@@ -96,6 +96,7 @@ typedef struct app_context_t {
     int precache_enabled;
     char custom_ws_url[512];
     char pending_reminder_text[256];
+    volatile int reminder_session_active;
 } app_context_t;
 
 #endif

@@ -1245,6 +1245,7 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
                     }
                     else
                     {
+                        app->reminder_session_active = 0;
                         state_machine_transition(&app->sm, kStateListening);
                     }
                 }
@@ -2029,6 +2030,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         PLOG_I("STATE", "Idle: 等待唤醒");
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_IDLE);
         display_ctrl_set_session(0);          /* 会话域息屏: 会话结束恢复亮屏 */
+        app->reminder_session_active = 0;
         music_player_on_idle();
         if (from == kStateCleaning)
         {
@@ -2144,7 +2146,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         }
         else
         {
-            if (app->wakeup.started && !wakeup_is_feed_active(&app->wakeup))
+            if (!app->reminder_session_active && app->wakeup.started && !wakeup_is_feed_active(&app->wakeup))
             {
                 wakeup_resume_feed(&app->wakeup);
             }
@@ -3321,7 +3323,21 @@ int main(int argc, char *argv[])
             app->pending_reminder_text[0] = '\0';
         }
 
-        /* 轮询定时提醒 (Idle 自动建连播报；Listening/Speaking 对话中直接插播) */
+        /* 若有挂起的提醒文本且已回到 Idle，立即发起全新播报会话 */
+        if (app->pending_reminder_text[0] &&
+            state_machine_get_state(&app->sm) == kStateIdle &&
+            app->ota_config_received && !app->needs_activation &&
+            config_manager_check_wifi())
+        {
+            if (music_player_is_playing())
+                music_player_pause();
+            app->reminder_session_active = 1;
+            app->session_start_ms = get_time_ms();
+            PLOG_I("REMINDER", "Idle 发起提醒播报会话");
+            state_machine_transition(&app->sm, kStateConnecting);
+        }
+
+        /* 轮询定时提醒 (断网时不消费保留至多5分钟；对话中先干净结束会话回 Idle 再重建连) */
         {
             static uint64_t last_rem_poll_ms = 0;
             uint64_t now_r = get_time_ms();
@@ -3329,7 +3345,8 @@ int main(int argc, char *argv[])
             {
                 last_rem_poll_ms = now_r;
                 xiaozhi_state_t rst = state_machine_get_state(&app->sm);
-                if ((rst == kStateIdle || rst == kStateListening || rst == kStateSpeaking) &&
+                if (!app->pending_reminder_text[0] &&
+                    (rst == kStateIdle || rst == kStateListening || rst == kStateSpeaking) &&
                     app->ota_config_received && !app->needs_activation &&
                     config_manager_check_wifi())
                 {
@@ -3338,25 +3355,20 @@ int main(int argc, char *argv[])
                     if (reminder_poll(rem_title, sizeof(rem_title)) > 0)
                     {
                         snprintf(app->pending_reminder_text, sizeof(app->pending_reminder_text),
-                                 "定时闹钟响了，内容是：%s。请直接语音提醒我，不要再设置新的提醒。", rem_title);
+                                 "系统闹钟已到点，请直接语音提醒我：%s。不要调用任何工具。", rem_title);
                         if (rst == kStateIdle)
                         {
                             if (music_player_is_playing())
                                 music_player_pause();
+                            app->reminder_session_active = 1;
                             app->session_start_ms = now_r;
                             PLOG_I("REMINDER", "Idle 自动发起提醒播报会话: %s", rem_title);
                             state_machine_transition(&app->sm, kStateConnecting);
                         }
-                        else if (protocol_handler_is_connected(&app->proto))
+                        else
                         {
-                            PLOG_I("REMINDER", "对话中(%s)即时插播提醒: %s",
+                            PLOG_I("REMINDER", "对话中(%s)到点，干净结束当前会话后播报提醒: %s",
                                    state_machine_get_state_name(rst), rem_title);
-                            if (app->recorder_initialized)
-                            {
-                                audio_precache_stop(&app->recorder_mod.precache);
-                                audio_recorder_module_stop_sending(&app->recorder_mod);
-                            }
-                            protocol_handler_clear_send_queue(&app->proto);
                             if (rst == kStateSpeaking)
                             {
                                 app->ignore_tts_audio = 1;
@@ -3364,14 +3376,7 @@ int main(int argc, char *argv[])
                                 audio_player_stop(&app->player);
                                 subtitle_interrupt();
                             }
-                            protocol_handler_send_abort(&app->proto, "reminder_triggered");
-                            usleep(50000);
-                            if (rst == kStateSpeaking)
-                            {
-                                state_machine_transition(&app->sm, kStateListening);
-                            }
-                            protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
-                            app->pending_reminder_text[0] = '\0';
+                            state_machine_transition(&app->sm, kStateCleaning);
                         }
                     }
                 }
