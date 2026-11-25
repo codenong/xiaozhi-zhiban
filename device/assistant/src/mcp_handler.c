@@ -862,6 +862,7 @@ void mcp_handler_process_message(mcp_handler_t *mcp, const char *json, size_t le
                 if (n >= (int)sizeof(json) - 1)
                     PLOG_E("MCP", "tools/list 响应被截断(%d>=%d), JSON 非法!", n, (int)sizeof(json));
                 mcp->send_json(json, n, mcp->user_data);
+                mcp->tools_listed = 1;
             }
         }
         else if (strcmp(method, "initialize") == 0)

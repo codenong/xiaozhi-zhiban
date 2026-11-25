@@ -2048,6 +2048,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         break;
     case kStateConnecting:
         PLOG_I("STATE", "Connecting: 建立云端连接");
+        app->mcp.tools_listed = 0;
         if (music_player_is_playing()) music_player_pause();
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_ACTIVE);
         /* 连接时暂停唤醒词检测 */
@@ -2089,8 +2090,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
             }
             else if (app->pending_reminder_text[0])
             {
-                protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
-                app->pending_reminder_text[0] = '\0';
+                /* 等待 MCP tools/list 完成后在主循环发送触发，避免云端握手期丢弃 */
                 if (app->wakeup.started && wakeup_is_feed_active(&app->wakeup))
                     wakeup_pause_feed(&app->wakeup);
                 break;
@@ -3311,6 +3311,16 @@ int main(int argc, char *argv[])
             memset(app->pending_config_buf, 0, sizeof(app->pending_config_buf));
         }
 
+        /* 若有待发送的提醒触发文本，等 MCP tools/list 完成后再发送 */
+        if (app->pending_reminder_text[0] &&
+            state_machine_get_state(&app->sm) == kStateListening &&
+            app->mcp.tools_listed &&
+            protocol_handler_is_connected(&app->proto))
+        {
+            protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
+            app->pending_reminder_text[0] = '\0';
+        }
+
         /* 轮询定时提醒 (Idle 且网络就绪时触发在线语音播报) */
         {
             static uint64_t last_rem_poll_ms = 0;
@@ -3329,7 +3339,7 @@ int main(int argc, char *argv[])
                         if (music_player_is_playing())
                             music_player_pause();
                         snprintf(app->pending_reminder_text, sizeof(app->pending_reminder_text),
-                                 "现在是定时提醒时间，请用亲切简短的语气提醒我：%s", rem_title);
+                                 "时间到了，提醒我%s", rem_title);
                         app->session_start_ms = now_r;
                         PLOG_I("REMINDER", "自动发起提醒播报会话: %s", rem_title);
                         state_machine_transition(&app->sm, kStateConnecting);

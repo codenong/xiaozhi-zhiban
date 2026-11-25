@@ -21,6 +21,7 @@ typedef struct {
 
     mcp_send_json_cb_t send_json;
     void *user_data;
+    volatile int tools_listed;
 } mcp_handler_t;
 
 int mcp_handler_init(mcp_handler_t *mcp);
