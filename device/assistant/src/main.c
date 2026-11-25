@@ -49,6 +49,7 @@
 #include "use_limit.h"
 #include "display_ctrl.h"
 #include "music_player.h"
+#include "reminder.h"
 #include "audioproc.h"
 #include "config_manager.h"
 #include "plog.h"
@@ -2086,6 +2087,14 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
             {
                 PLOG_I("STATE", "Realtime模式: Speaking→Listening, 跳过重复start_listening");
             }
+            else if (app->pending_reminder_text[0])
+            {
+                protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
+                app->pending_reminder_text[0] = '\0';
+                if (app->wakeup.started && wakeup_is_feed_active(&app->wakeup))
+                    wakeup_pause_feed(&app->wakeup);
+                break;
+            }
             else
             {
                 protocol_handler_send_start_listening(&app->proto,
@@ -3054,6 +3063,7 @@ int main(int argc, char *argv[])
     use_limit_init();          /* 每日使用时长(§四) */
     display_ctrl_start();      /* 会话域息屏管理器(§八需求③) */
     music_player_init();
+    reminder_init();
     tls_dns_cache_load_config(); /* DNS 缓存时长(面板可热更新) */
 
     /* 拉起 xwebd 面板守护(rootfs squashfs 只读无法挂 rcS, 借助手进程宿主化, 幂等) */
@@ -3301,6 +3311,32 @@ int main(int argc, char *argv[])
             memset(app->pending_config_buf, 0, sizeof(app->pending_config_buf));
         }
 
+        /* 轮询定时提醒 (Idle 且网络就绪时触发在线语音播报) */
+        {
+            static uint64_t last_rem_poll_ms = 0;
+            uint64_t now_r = get_time_ms();
+            if (now_r - last_rem_poll_ms >= 500)
+            {
+                last_rem_poll_ms = now_r;
+                if (state_machine_get_state(&app->sm) == kStateIdle &&
+                    app->ota_config_received && !app->needs_activation &&
+                    is_wifi_connected())
+                {
+                    char rem_title[160] = {0};
+                    if (reminder_poll(rem_title, sizeof(rem_title)) > 0)
+                    {
+                        if (music_player_is_playing())
+                            music_player_pause();
+                        snprintf(app->pending_reminder_text, sizeof(app->pending_reminder_text),
+                                 "现在是定时提醒时间，请用亲切简短的语气提醒我：%s", rem_title);
+                        app->session_start_ms = now_r;
+                        PLOG_I("REMINDER", "自动发起提醒播报会话: %s", rem_title);
+                        state_machine_transition(&app->sm, kStateConnecting);
+                    }
+                }
+            }
+        }
+
         /* 处理API唤醒请求 */
         if (app->pending_api_wakeup)
         {
@@ -3456,6 +3492,7 @@ int main(int argc, char *argv[])
 
     wakeup_destroy(&app->wakeup);
     touch_key_destroy(&app->touch_key);
+    reminder_destroy();
     music_player_destroy();
     if (app->mcp_initialized)
     {

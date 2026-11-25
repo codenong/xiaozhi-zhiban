@@ -120,6 +120,8 @@ echo "[19d] Compiling display_ctrl.o"
 $CC $COMMON_CFLAGS -c "$PROJECT_DIR/src/display_ctrl.c" -o "$BUILD_DIR/display_ctrl.o"
 echo "[19e] Compiling music_player.o"
 $CC $COMMON_CFLAGS -c "$PROJECT_DIR/src/music_player.c" -o "$BUILD_DIR/music_player.o"
+echo "[19f] Compiling reminder.o"
+$CC $COMMON_CFLAGS -c "$PROJECT_DIR/src/reminder.c" -o "$BUILD_DIR/reminder.o"
 
 echo "Linking sair"
 $CC --sysroot=$SYSROOT \
@@ -151,6 +153,7 @@ $CC --sysroot=$SYSROOT \
     $BUILD_DIR/use_limit.o \
     $BUILD_DIR/display_ctrl.o \
     $BUILD_DIR/music_player.o \
+    $BUILD_DIR/reminder.o \
     -L$STUB_DIR \
     -L$LIB_DIR \
     -L$SYSROOT/usr/lib \

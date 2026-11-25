@@ -112,6 +112,7 @@ int protocol_handler_poll(protocol_handler_t *proto, int timeout_ms);
 int protocol_handler_send_audio(protocol_handler_t *proto, const uint8_t *opus_data, size_t opus_len);
 int protocol_handler_send_start_listening(protocol_handler_t *proto, const char *mode);
 int protocol_handler_send_stop_listening(protocol_handler_t *proto);
+int protocol_handler_send_wake_word_detected(protocol_handler_t *proto, const char *text);
 int protocol_handler_send_abort(protocol_handler_t *proto, const char *reason);
 int protocol_handler_send_json(protocol_handler_t *proto, const char *json, size_t len);
 void protocol_handler_clear_send_queue(protocol_handler_t *proto);

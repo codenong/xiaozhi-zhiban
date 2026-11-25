@@ -95,6 +95,7 @@ typedef struct app_context_t {
     int aec_mode;          /* AEC方案: 0=本地NLMS(默认) 1=云端(timestamp配对) */
     int precache_enabled;
     char custom_ws_url[512];
+    char pending_reminder_text[256];
 } app_context_t;
 
 #endif

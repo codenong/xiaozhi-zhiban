@@ -28,6 +28,7 @@
 #include "use_limit.h"
 #include "display_ctrl.h"
 #include "music_player.h"
+#include "reminder.h"
 #include "reverse/applib_api.h"   /* get_config/set_config/sync_config (libapconfig) */
 
 /* 动态加载符号的宏，加载失败时输出警告日志 */
@@ -647,6 +648,39 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
         return 0;
     }
 
+    /* 定时提醒 (self.reminder.*) */
+    if (strcmp(name, "self.reminder.set") == 0)
+    {
+        char title[160] = {0};
+        char trigger_time[64] = {0};
+        char repeat[32] = {0};
+        find_string(args_json, args_len, "title", title, sizeof(title));
+        find_string(args_json, args_len, "trigger_time", trigger_time, sizeof(trigger_time));
+        find_string(args_json, args_len, "repeat", repeat, sizeof(repeat));
+        int delay_sec = find_int(args_json, args_len, "delay_seconds", 0);
+        if (reminder_add(title, delay_sec, trigger_time, repeat, result, result_size) == 0)
+            return 0;
+        return -1;
+    }
+
+    if (strcmp(name, "self.reminder.list") == 0)
+    {
+        reminder_list(result, result_size);
+        return 0;
+    }
+
+    if (strcmp(name, "self.reminder.delete") == 0)
+    {
+        int id = find_int(args_json, args_len, "id", 0);
+        if (reminder_delete(id) == 0)
+        {
+            snprintf(result, result_size, id <= 0 ? "all reminders cleared" : "reminder #%d deleted", id);
+            return 0;
+        }
+        snprintf(result, result_size, "reminder #%d not found", id);
+        return -1;
+    }
+
     /* 列出所有可用的MCP工具 */
     if (strcmp(name, "self.get_mcp_tools") == 0)
     {
@@ -669,7 +703,10 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
                  "15.self.music.pause - Pause music; "
                  "16.self.music.resume - Resume music; "
                  "17.self.music.stop - Stop music; "
-                 "18.self.music.get_status - Music status");
+                 "18.self.music.get_status - Music status; "
+                 "19.self.reminder.set - Set timer/alarm reminder; "
+                 "20.self.reminder.list - List reminders; "
+                 "21.self.reminder.delete - Delete reminder");
         return 0;
     }
 
@@ -817,6 +854,9 @@ void mcp_handler_process_message(mcp_handler_t *mcp, const char *json, size_t le
                                  ",{\"name\":\"self.music.resume\",\"description\":\"Resume paused music from breakpoint. 继续播放音乐\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
                                  ",{\"name\":\"self.music.stop\",\"description\":\"Stop music playback completely. 停止播放音乐\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
                                  ",{\"name\":\"self.music.get_status\",\"description\":\"Get current music player status and title.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+                                 ",{\"name\":\"self.reminder.set\",\"description\":\"Set a timed reminder or alarm. 设置定时提醒/闹钟。支持 delay_seconds(多少秒后) 或 trigger_time(HH:MM 或 YYYY-MM-DD HH:MM:SS)\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\",\"description\":\"Reminder content, e.g. 喝水/写作业\"},\"delay_seconds\":{\"type\":\"integer\",\"description\":\"Seconds from now\"},\"trigger_time\":{\"type\":\"string\",\"description\":\"Local time HH:MM or YYYY-MM-DD HH:MM:SS\"},\"repeat\":{\"type\":\"string\",\"description\":\"none or daily\"}},\"required\":[\"title\"]}}"
+                                 ",{\"name\":\"self.reminder.list\",\"description\":\"List all active reminders. 查询当前有哪些定时提醒\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+                                 ",{\"name\":\"self.reminder.delete\",\"description\":\"Delete a reminder by id (0=clear all). 删除或取消定时提醒\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Reminder ID (0 to clear all)\"}}}}"
                                  "]}}}",
                                  (long long)id);
                 if (n >= (int)sizeof(json) - 1)

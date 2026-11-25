@@ -585,6 +585,20 @@ int protocol_handler_send_stop_listening(protocol_handler_t *proto)
     return websocket_send_text(&proto->ws, json) ? 0 : -1;
 }
 
+int protocol_handler_send_wake_word_detected(protocol_handler_t *proto, const char *text)
+{
+    if (!proto || !proto->connected || !text || !text[0])
+        return -1;
+
+    char json[512];
+    snprintf(json, sizeof(json),
+             "{\"session_id\":\"%s\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"%s\"}",
+             proto->session_id, text);
+
+    PLOG_I("PROTO", "发送文本触发: %.64s", text);
+    return websocket_send_text(&proto->ws, json) ? 0 : -1;
+}
+
 int protocol_handler_send_abort(protocol_handler_t *proto, const char *reason)
 {
     if (!proto || !proto->connected)
