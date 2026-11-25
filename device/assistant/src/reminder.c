@@ -36,18 +36,7 @@ static struct {
 
 static int get_tz_offset_sec(void)
 {
-    time_t now = time(NULL);
-    struct tm lt;
-    localtime_r(&now, &lt);
-#ifdef __USE_MISC
-    if (lt.tm_gmtoff != 0)
-        return (int)lt.tm_gmtoff;
-#endif
-    /* 如果系统时区就是 UTC，按 UTC+8（北京时间）换算本地钟点 */
-    struct tm gt;
-    gmtime_r(&now, &gt);
-    if (lt.tm_hour == gt.tm_hour && lt.tm_mday == gt.tm_mday)
-        return REMINDER_TZ_OFFSET;
+    /* 设备系统时钟本身已是本地北京时间（只是未设 TZ 变量），无需再额外加减 8 小时 */
     return 0;
 }
 
