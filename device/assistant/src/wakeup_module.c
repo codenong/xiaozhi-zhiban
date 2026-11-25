@@ -130,16 +130,24 @@ static int load_config(void)
                 sizeof(g_main_wake_word) - 1);
     }
 
-    /* 读取主唤醒词阈值，缺失时使用默认0.5 */
+    /* 读取主唤醒词阈值，缺失时使用默认0.30（提高灵敏度） */
     ret = get_config("MAIN_WAKE_THRESH", g_main_wake_thresh, sizeof(g_main_wake_thresh));
-    if (ret < 0 || g_main_wake_thresh[0] == '\0')
+    if (ret < 0 || g_main_wake_thresh[0] == '\0' || strcmp(g_main_wake_thresh, "0.5") == 0)
     {
-        strncpy(g_main_wake_thresh, "0.5", sizeof(g_main_wake_thresh) - 1);
+        strncpy(g_main_wake_thresh, "0.30", sizeof(g_main_wake_thresh) - 1);
     }
 
     /* 读取可选的自定义唤醒词和本地命令词配置 */
     get_config("CUSTOM_WAKE_WORD", g_custom_wake_word, sizeof(g_custom_wake_word));
     get_config("CUSTOM_WAKE_THRESH", g_custom_wake_thresh, sizeof(g_custom_wake_thresh));
+    if (g_custom_wake_word[0] == '\0')
+    {
+        strncpy(g_custom_wake_word, "xiao zhi xiao zhi", sizeof(g_custom_wake_word) - 1);
+    }
+    if (g_custom_wake_thresh[0] == '\0')
+    {
+        strncpy(g_custom_wake_thresh, "0.30", sizeof(g_custom_wake_thresh) - 1);
+    }
     get_config("LOCAL_COMMAND_WORD", g_local_command_word, sizeof(g_local_command_word));
     get_config("LOCAL_COMMAND_THRESH", g_local_command_thresh, sizeof(g_local_command_thresh));
 
@@ -187,6 +195,8 @@ static int load_config(void)
     }
 
     PLOG_I("WAKEUP", "产品ID: %s", g_product_id);
+    PLOG_I("WAKEUP", "主唤醒词='%s' 阈值=%s", g_main_wake_word, g_main_wake_thresh);
+    PLOG_I("WAKEUP", "自定义唤醒词='%s' 阈值=%s", g_custom_wake_word, g_custom_wake_thresh);
     PLOG_I("WAKEUP", "唤醒模型: %s", g_wakeup_res_path);
     PLOG_I("WAKEUP", "VAD资源: %s", g_vad_res_path);
     PLOG_I("WAKEUP", "AEC资源: %s", g_aec_res_path);
@@ -223,7 +233,7 @@ static void asr_callback(int event_type, int result)
         }
         break;
     case ASR_EVENT_DIFF_WORD:
-        PLOG_D("ASR", "差异化唤醒词: result=%d", result);
+        PLOG_I("ASR", "差异化唤醒词: result=%d", result);
         break;
     case ASR_EVENT_VAD_CHANGE:
         PLOG_D("ASR", "VAD状态变化: result=%d", result);
@@ -235,7 +245,7 @@ static void asr_callback(int event_type, int result)
         PLOG_D("ASR", "VAD超时");
         break;
     default:
-        PLOG_D("ASR", "未知事件: type=%d result=%d", event_type, result);
+        PLOG_I("ASR", "未知事件: type=%d result=%d", event_type, result);
         break;
     }
 }
@@ -253,8 +263,30 @@ static void asr_callback(int event_type, int result)
 static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
 {
     wakeup_module_t *mod = (wakeup_module_t *)user_data;
-    if (!mod || mod->paused || !mod->started || !mod->asr_handle)
+    static unsigned long s_cb_cnt = 0;
+    static unsigned long s_skip_cnt = 0;
+    s_cb_cnt++;
+    if (!mod || mod->paused || !mod->started || !mod->asr_handle) {
+        s_skip_cnt++;
+        if (s_skip_cnt % 250 == 1) {
+            PLOG_I("WAKEUP-DIAG", "音频跳过 #%lu: paused=%d started=%d handle=%p",
+                   s_skip_cnt, mod ? mod->paused : -1, mod ? mod->started : -1,
+                   mod ? mod->asr_handle : NULL);
+        }
         return;
+    }
+    if (s_cb_cnt % 250 == 1) {
+        long long sum_abs = 0;
+        int step = (len > 3) ? 3 : 1;
+        int n_samp = 0;
+        for (int k = 0; k < len; k += step) {
+            int v = data[k];
+            sum_abs += (v < 0) ? -v : v;
+            n_samp++;
+        }
+        int avg_abs = n_samp > 0 ? (int)(sum_abs / n_samp) : 0;
+        PLOG_I("WAKEUP-DIAG", "喂流正常 #%lu: len=%d avg_abs=%d", s_cb_cnt, len, avg_abs);
+    }
     if (mod->f_asr_feed_data)
     {
         /* 整帧对齐防护(X14 成果转化): fespl 按 wavChan(3)×2B=6B 切帧,
