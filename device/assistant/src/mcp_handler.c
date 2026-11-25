@@ -27,6 +27,7 @@
 #include "platform_power.h"
 #include "use_limit.h"
 #include "display_ctrl.h"
+#include "music_player.h"
 #include "reverse/applib_api.h"   /* get_config/set_config/sync_config (libapconfig) */
 
 /* 动态加载符号的宏，加载失败时输出警告日志 */
@@ -154,6 +155,18 @@ static const char *find_string(const char *json, size_t len, const char *key, ch
                 break;
             case '\\':
                 out[i++] = '\\';
+                break;
+            case '/':
+                out[i++] = '/';
+                break;
+            case 'u':
+                if (p + 4 < json + len && p[1] == '0' && p[2] == '0') {
+                    char hex[3] = { p[3], p[4], 0 };
+                    out[i++] = (char)strtol(hex, NULL, 16);
+                    p += 4;
+                } else {
+                    out[i++] = *p;
+                }
                 break;
             default:
                 out[i++] = *p;
@@ -586,6 +599,54 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
         return 0;
     }
 
+    /* 音乐播放控制 (self.music.*) */
+    if (strcmp(name, "self.music.play_url") == 0)
+    {
+        char url[1536] = {0};
+        char title[256] = {0};
+        find_string(args_json, args_len, "url", url, sizeof(url));
+        find_string(args_json, args_len, "title", title, sizeof(title));
+        if (!url[0])
+        {
+            snprintf(result, result_size, "missing url");
+            return -1;
+        }
+        if (music_player_play_url(url, title, true) == 0)
+        {
+            snprintf(result, result_size, "playing %s", title[0] ? title : "music");
+            return 0;
+        }
+        snprintf(result, result_size, "failed to start music");
+        return -1;
+    }
+
+    if (strcmp(name, "self.music.pause") == 0)
+    {
+        int r = music_player_pause();
+        snprintf(result, result_size, r == 0 ? "music paused" : "no active music");
+        return 0;
+    }
+
+    if (strcmp(name, "self.music.resume") == 0)
+    {
+        int r = music_player_resume();
+        snprintf(result, result_size, r == 0 ? "music resumed" : "no paused music");
+        return 0;
+    }
+
+    if (strcmp(name, "self.music.stop") == 0)
+    {
+        music_player_stop();
+        snprintf(result, result_size, "music stopped");
+        return 0;
+    }
+
+    if (strcmp(name, "self.music.get_status") == 0)
+    {
+        music_player_get_status(result, result_size);
+        return 0;
+    }
+
     /* 列出所有可用的MCP工具 */
     if (strcmp(name, "self.get_mcp_tools") == 0)
     {
@@ -603,7 +664,12 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
                  "10.self.limit_delay N - Extend usage time N minutes when daily limit reached (再延长N分钟); "
                  "11.self.screen_off_set N - Set screen-off idle seconds (0=off); "
                  "12.self.screen_off_now - Turn off screen immediately, voice chat continues; "
-                 "13.self.screen_on_now - Turn screen back on. 亮屏/打开屏幕");
+                 "13.self.screen_on_now - Turn screen back on. 亮屏/打开屏幕; "
+                 "14.self.music.play_url - Play MP3 URL; "
+                 "15.self.music.pause - Pause music; "
+                 "16.self.music.resume - Resume music; "
+                 "17.self.music.stop - Stop music; "
+                 "18.self.music.get_status - Music status");
         return 0;
     }
 
@@ -746,6 +812,11 @@ void mcp_handler_process_message(mcp_handler_t *mcp, const char *json, size_t le
                                  "{\"name\":\"self.screen_off_now\",\"description\":\"Turn off screen now, voice chat continues. 关屏幕/息屏. Touch wakes screen.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
                                  "{\"name\":\"self.screen_on_now\",\"description\":\"Turn the screen back on after it was turned off. Use when user says 亮屏/打开屏幕/把屏幕点亮.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
                                  "{\"name\":\"self.poweroff\",\"description\":\"Shut down device with native animation, for 关机/关闭/不玩了/睡觉. NOT for 重启 (use self.reboot).\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}},\"annotations\":{\"audience\":[\"user\"]}}"
+                                 ",{\"name\":\"self.music.play_url\",\"description\":\"Play MP3 audio from URL on device speaker. 调用 play_song 拿到 play_url 后调用此工具播放\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"description\":\"MP3 stream URL\"},\"title\":{\"type\":\"string\",\"description\":\"Song title\"}},\"required\":[\"url\"]}}"
+                                 ",{\"name\":\"self.music.pause\",\"description\":\"Pause currently playing music. 暂停播放音乐\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+                                 ",{\"name\":\"self.music.resume\",\"description\":\"Resume paused music from breakpoint. 继续播放音乐\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+                                 ",{\"name\":\"self.music.stop\",\"description\":\"Stop music playback completely. 停止播放音乐\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+                                 ",{\"name\":\"self.music.get_status\",\"description\":\"Get current music player status and title.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
                                  "]}}}",
                                  (long long)id);
                 if (n >= (int)sizeof(json) - 1)

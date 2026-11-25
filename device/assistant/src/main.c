@@ -48,6 +48,7 @@
 #include "watchdog.h"
 #include "use_limit.h"
 #include "display_ctrl.h"
+#include "music_player.h"
 #include "audioproc.h"
 #include "config_manager.h"
 #include "plog.h"
@@ -2019,6 +2020,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         PLOG_I("STATE", "Idle: 等待唤醒");
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_IDLE);
         display_ctrl_set_session(0);          /* 会话域息屏: 会话结束恢复亮屏 */
+        music_player_on_idle();
         if (from == kStateCleaning)
         {
             do_session_cleanup(app, now, prev_state_enter_time_ms);
@@ -2037,6 +2039,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         break;
     case kStateConnecting:
         PLOG_I("STATE", "Connecting: 建立云端连接");
+        if (music_player_is_playing()) music_player_pause();
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_ACTIVE);
         /* 连接时暂停唤醒词检测 */
         if (app->wakeup.started)
@@ -2066,6 +2069,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
     case kStateListening:
         PLOG_I("STATE", "Listening: 等待用户语音 (唤醒后+%llums)",
                (unsigned long long)(get_time_ms() - app->session_start_ms));
+        if (music_player_is_playing()) music_player_pause();
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_ACTIVE);
         display_ctrl_set_session(1);          /* 会话域息屏管理开始计时 */
         if (protocol_handler_is_connected(&app->proto))
@@ -3041,6 +3045,7 @@ int main(int argc, char *argv[])
     /* 注册IPC消息分发器 */
     use_limit_init();          /* 每日使用时长(§四) */
     display_ctrl_start();      /* 会话域息屏管理器(§八需求③) */
+    music_player_init();
     tls_dns_cache_load_config(); /* DNS 缓存时长(面板可热更新) */
 
     /* 拉起 xwebd 面板守护(rootfs squashfs 只读无法挂 rcS, 借助手进程宿主化, 幂等) */
@@ -3443,6 +3448,7 @@ int main(int argc, char *argv[])
 
     wakeup_destroy(&app->wakeup);
     touch_key_destroy(&app->touch_key);
+    music_player_destroy();
     if (app->mcp_initialized)
     {
         mcp_handler_destroy(&app->mcp);

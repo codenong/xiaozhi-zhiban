@@ -17,7 +17,7 @@ CJSON_DIR="$PROJECT_DIR/lib/cJSON"
 OPUS_DIR="$PROJECT_DIR/lib/opus"
 LIB_DIR="$PROJECT_DIR/lib_sf"
 
-COMMON_CFLAGS="-Wall -Os -g0 -mcpu=cortex-a5 -mfloat-abi=soft -no-pie --sysroot=$SYSROOT -I$PROJECT_DIR/include -I$REVERSE_INCLUDE -I$MBEDTLS_DIR/include -I$CJSON_DIR -I$OPUS_DIR/include -D_GNU_SOURCE -DFIXED_POINT=1"
+COMMON_CFLAGS="-Wall -Os -g0 -mcpu=cortex-a5 -mfloat-abi=soft -no-pie --sysroot=$SYSROOT -I$PROJECT_DIR/include -I$REVERSE_INCLUDE -I$MBEDTLS_DIR/include -I$CJSON_DIR -I$OPUS_DIR/include -I$PROJECT_DIR/lib/minimp3 -D_GNU_SOURCE -DFIXED_POINT=1"
 
 STUB_DIR="$BUILD_DIR/stubs"
 mkdir -p "$BUILD_DIR" "$STUB_DIR"
@@ -118,6 +118,8 @@ echo "[19c] Compiling use_limit.o"
 $CC $COMMON_CFLAGS -c "$PROJECT_DIR/src/use_limit.c" -o "$BUILD_DIR/use_limit.o"
 echo "[19d] Compiling display_ctrl.o"
 $CC $COMMON_CFLAGS -c "$PROJECT_DIR/src/display_ctrl.c" -o "$BUILD_DIR/display_ctrl.o"
+echo "[19e] Compiling music_player.o"
+$CC $COMMON_CFLAGS -c "$PROJECT_DIR/src/music_player.c" -o "$BUILD_DIR/music_player.o"
 
 echo "Linking sair"
 $CC --sysroot=$SYSROOT \
@@ -148,6 +150,7 @@ $CC --sysroot=$SYSROOT \
     $BUILD_DIR/platform_power.o \
     $BUILD_DIR/use_limit.o \
     $BUILD_DIR/display_ctrl.o \
+    $BUILD_DIR/music_player.o \
     -L$STUB_DIR \
     -L$LIB_DIR \
     -L$SYSROOT/usr/lib \
