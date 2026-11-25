@@ -3320,9 +3320,10 @@ int main(int argc, char *argv[])
                 last_rem_poll_ms = now_r;
                 if (state_machine_get_state(&app->sm) == kStateIdle &&
                     app->ota_config_received && !app->needs_activation &&
-                    is_wifi_connected())
+                    config_manager_check_wifi())
                 {
-                    char rem_title[160] = {0};
+                    static char rem_title[160];
+                    rem_title[0] = '\0';
                     if (reminder_poll(rem_title, sizeof(rem_title)) > 0)
                     {
                         if (music_player_is_playing())
