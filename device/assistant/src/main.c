@@ -3355,7 +3355,7 @@ int main(int argc, char *argv[])
                     if (reminder_poll(rem_title, sizeof(rem_title)) > 0)
                     {
                         snprintf(app->pending_reminder_text, sizeof(app->pending_reminder_text),
-                                 "系统闹钟已到点，请直接语音提醒我：%s。不要调用任何工具。", rem_title);
+                                 "%s时间到啦", rem_title);
                         if (rst == kStateIdle)
                         {
                             if (music_player_is_playing())
