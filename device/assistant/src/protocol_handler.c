@@ -595,7 +595,7 @@ int protocol_handler_send_wake_word_detected(protocol_handler_t *proto, const ch
              "{\"session_id\":\"%s\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"%s\"}",
              proto->session_id, text);
 
-    PLOG_I("PROTO", "发送文本触发: %.64s", text);
+    PLOG_I("PROTO", "发送文本触发: %s", text);
     return websocket_send_text(&proto->ws, json) ? 0 : -1;
 }
 

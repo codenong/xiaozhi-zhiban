@@ -140,6 +140,7 @@ static void save_locked(void)
     if (f) {
         fwrite(txt, 1, strlen(txt), f);
         fclose(f);
+        unlink(REMINDER_FILE);
         rename(REMINDER_FILE ".tmp", REMINDER_FILE);
     }
     free(txt);

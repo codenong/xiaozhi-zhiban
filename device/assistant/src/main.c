@@ -3351,14 +3351,23 @@ int main(int argc, char *argv[])
                         {
                             PLOG_I("REMINDER", "对话中(%s)即时插播提醒: %s",
                                    state_machine_get_state_name(rst), rem_title);
+                            if (app->recorder_initialized)
+                            {
+                                audio_precache_stop(&app->recorder_mod.precache);
+                                audio_recorder_module_stop_sending(&app->recorder_mod);
+                            }
+                            protocol_handler_clear_send_queue(&app->proto);
                             if (rst == kStateSpeaking)
                             {
                                 app->ignore_tts_audio = 1;
                                 app->player.aborted = true;
                                 audio_player_stop(&app->player);
                                 subtitle_interrupt();
-                                protocol_handler_send_abort(&app->proto, "reminder_triggered");
-                                protocol_handler_clear_send_queue(&app->proto);
+                            }
+                            protocol_handler_send_abort(&app->proto, "reminder_triggered");
+                            usleep(50000);
+                            if (rst == kStateSpeaking)
+                            {
                                 state_machine_transition(&app->sm, kStateListening);
                             }
                             protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
