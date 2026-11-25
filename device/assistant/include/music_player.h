@@ -17,11 +17,12 @@ void music_player_destroy(void);
 
 int music_player_play_url(const char *url, const char *title, bool defer_start);
 int music_player_pause(void);
-int music_player_resume(void);
+int music_player_resume(bool defer_start);
 int music_player_stop(void);
 
 void music_player_on_idle(void);
 bool music_player_is_playing(void);
+bool music_player_has_deferred(void);
 music_state_t music_player_get_state(void);
 void music_player_get_status(char *buf, size_t size);
 

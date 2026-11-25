@@ -629,7 +629,7 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
 
     if (strcmp(name, "self.music.resume") == 0)
     {
-        int r = music_player_resume();
+        int r = music_player_resume(true);
         snprintf(result, result_size, r == 0 ? "music resumed" : "no paused music");
         return 0;
     }

@@ -925,7 +925,7 @@ int music_player_pause(void)
     return -1;
 }
 
-int music_player_resume(void)
+int music_player_resume(bool defer_start)
 {
     if (!g_mp.initialized)
         return -1;
@@ -933,8 +933,8 @@ int music_player_resume(void)
     pthread_mutex_lock(&g_mp.lock);
     bool can_resume = (g_mp.state == MUSIC_STATE_PAUSED && g_mp.url[0] != '\0');
     if (can_resume) {
-        g_mp.defer_start = false;
-        g_mp.state = MUSIC_STATE_BUFFERING;
+        g_mp.defer_start = defer_start;
+        g_mp.state = defer_start ? MUSIC_STATE_DEFERRED : MUSIC_STATE_BUFFERING;
     }
     pthread_mutex_unlock(&g_mp.lock);
 
@@ -971,11 +971,19 @@ bool music_player_is_playing(void)
     if (!g_mp.initialized)
         return false;
     pthread_mutex_lock(&g_mp.lock);
-    bool busy = (g_mp.state == MUSIC_STATE_PLAYING ||
-                 g_mp.state == MUSIC_STATE_BUFFERING ||
-                 g_mp.state == MUSIC_STATE_DEFERRED);
+    bool playing = (g_mp.state == MUSIC_STATE_PLAYING);
     pthread_mutex_unlock(&g_mp.lock);
-    return busy;
+    return playing;
+}
+
+bool music_player_has_deferred(void)
+{
+    if (!g_mp.initialized)
+        return false;
+    pthread_mutex_lock(&g_mp.lock);
+    bool def = (g_mp.defer_start && g_mp.thread_running);
+    pthread_mutex_unlock(&g_mp.lock);
+    return def;
 }
 
 music_state_t music_player_get_state(void)

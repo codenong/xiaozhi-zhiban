@@ -1237,7 +1237,15 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
                 xiaozhi_state_t cur_state = state_machine_get_state(&app->sm);
                 if (cur_state != kStateCleaning)
                 {
-                    state_machine_transition(&app->sm, kStateListening);
+                    if (music_player_has_deferred())
+                    {
+                        PLOG_I("MUSIC", "TTS 播完且有待播音乐，结束会话进入 Idle 起播");
+                        state_machine_transition(&app->sm, kStateCleaning);
+                    }
+                    else
+                    {
+                        state_machine_transition(&app->sm, kStateListening);
+                    }
                 }
             }
         }
