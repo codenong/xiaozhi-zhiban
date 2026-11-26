@@ -142,6 +142,7 @@ static void save_locked(void)
         fclose(f);
         unlink(REMINDER_FILE);
         rename(REMINDER_FILE ".tmp", REMINDER_FILE);
+        PLOG_I("REMINDER", "已落盘保存, 剩余 %d 条提醒", g_rem.count);
     }
     free(txt);
 }
@@ -345,8 +346,10 @@ int reminder_poll(char *out_title, size_t out_sz)
                 if (it->daily) {
                     while (it->trigger_epoch <= now)
                         it->trigger_epoch += 86400;
+                    PLOG_W("REMINDER", "顺延过期每日提醒 #%d: %s", it->id, it->title);
                     i++;
                 } else {
+                    PLOG_W("REMINDER", "丢弃过期(>5min)单次提醒 #%d: %s", it->id, it->title);
                     for (int j = i; j < g_rem.count - 1; j++)
                         g_rem.items[j] = g_rem.items[j + 1];
                     g_rem.count--;

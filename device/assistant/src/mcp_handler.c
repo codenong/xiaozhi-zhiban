@@ -671,10 +671,23 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
 
     if (strcmp(name, "self.reminder.delete") == 0)
     {
-        int id = find_int(args_json, args_len, "id", 0);
+        int id = find_int(args_json, args_len, "id", -1);
+        int clear_all = (memmem(args_json, args_len, "\"all\":true", 10) != NULL ||
+                         memmem(args_json, args_len, "\"all\": true", 11) != NULL);
+        if (clear_all)
+        {
+            reminder_delete(0);
+            snprintf(result, result_size, "all reminders cleared");
+            return 0;
+        }
+        if (id <= 0)
+        {
+            snprintf(result, result_size, "missing valid id (pass id>0 or all=true)");
+            return -1;
+        }
         if (reminder_delete(id) == 0)
         {
-            snprintf(result, result_size, id <= 0 ? "all reminders cleared" : "reminder #%d deleted", id);
+            snprintf(result, result_size, "reminder #%d deleted", id);
             return 0;
         }
         snprintf(result, result_size, "reminder #%d not found", id);
@@ -856,7 +869,7 @@ void mcp_handler_process_message(mcp_handler_t *mcp, const char *json, size_t le
                                  ",{\"name\":\"self.music.get_status\",\"description\":\"Get current music player status and title.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
                                  ",{\"name\":\"self.reminder.set\",\"description\":\"Set a timed reminder or alarm. 设置定时提醒/闹钟。支持 delay_seconds(多少秒后) 或 trigger_time(HH:MM 或 YYYY-MM-DD HH:MM:SS)\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\",\"description\":\"Reminder content, e.g. 喝水/写作业\"},\"delay_seconds\":{\"type\":\"integer\",\"description\":\"Seconds from now\"},\"trigger_time\":{\"type\":\"string\",\"description\":\"Local time HH:MM or YYYY-MM-DD HH:MM:SS\"},\"repeat\":{\"type\":\"string\",\"description\":\"none or daily\"}},\"required\":[\"title\"]}}"
                                  ",{\"name\":\"self.reminder.list\",\"description\":\"List all active reminders. 查询当前有哪些定时提醒\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
-                                 ",{\"name\":\"self.reminder.delete\",\"description\":\"Delete a reminder by id (0=clear all). 删除或取消定时提醒\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Reminder ID (0 to clear all)\"}}}}"
+                                 ",{\"name\":\"self.reminder.delete\",\"description\":\"Delete a reminder by id, or pass all=true to clear all. 删除或取消指定定时提醒\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Reminder ID (>0)\"},\"all\":{\"type\":\"boolean\",\"description\":\"Set true only when clearing all reminders\"}}}}"
                                  "]}}}",
                                  (long long)id);
                 if (n >= (int)sizeof(json) - 1)
