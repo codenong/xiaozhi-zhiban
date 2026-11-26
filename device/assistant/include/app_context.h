@@ -101,6 +101,10 @@ typedef struct app_context_t {
     volatile int resume_story_after_reminder;
     char last_spoken_sentence[128];
     char interrupted_story_anchor[64];
+    volatile int tts_suspended;
+    volatile int suspended_tts_ended;
+    volatile int dual_ws_reminder_running;
+    volatile int dual_ws_reminder_done;
 } app_context_t;
 
 #endif

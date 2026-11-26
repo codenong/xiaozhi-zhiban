@@ -1077,6 +1077,223 @@ static void *recorder_thread_func(void *arg)
  */
 static int tts_audio_count = 0;
 
+/* ---- 方案二：TTS 挂起缓存队列 & 临时 WS 提醒线程 ---- */
+#define SUSPEND_QUEUE_MAX_FRAMES 3000
+
+typedef struct suspend_frame_node {
+    uint32_t timestamp;
+    size_t len;
+    struct suspend_frame_node *next;
+    uint8_t data[];
+} suspend_frame_node_t;
+
+static struct {
+    pthread_mutex_t lock;
+    suspend_frame_node_t *head;
+    suspend_frame_node_t *tail;
+    int count;
+    volatile int draining;
+} g_suspend_q = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+static void suspend_queue_push(const uint8_t *data, size_t len, uint32_t ts)
+{
+    if (!data || len == 0) return;
+    suspend_frame_node_t *node = (suspend_frame_node_t *)malloc(sizeof(suspend_frame_node_t) + len);
+    if (!node) return;
+    node->timestamp = ts;
+    node->len = len;
+    node->next = NULL;
+    memcpy(node->data, data, len);
+
+    pthread_mutex_lock(&g_suspend_q.lock);
+    if (g_suspend_q.count >= SUSPEND_QUEUE_MAX_FRAMES) {
+        suspend_frame_node_t *old = g_suspend_q.head;
+        if (old) {
+            g_suspend_q.head = old->next;
+            if (!g_suspend_q.head) g_suspend_q.tail = NULL;
+            free(old);
+            g_suspend_q.count--;
+        }
+    }
+    if (g_suspend_q.tail) {
+        g_suspend_q.tail->next = node;
+        g_suspend_q.tail = node;
+    } else {
+        g_suspend_q.head = g_suspend_q.tail = node;
+    }
+    g_suspend_q.count++;
+    pthread_mutex_unlock(&g_suspend_q.lock);
+}
+
+static suspend_frame_node_t *suspend_queue_pop(void)
+{
+    pthread_mutex_lock(&g_suspend_q.lock);
+    suspend_frame_node_t *n = g_suspend_q.head;
+    if (n) {
+        g_suspend_q.head = n->next;
+        if (!g_suspend_q.head) g_suspend_q.tail = NULL;
+        g_suspend_q.count--;
+    }
+    pthread_mutex_unlock(&g_suspend_q.lock);
+    return n;
+}
+
+static void suspend_queue_clear(void)
+{
+    pthread_mutex_lock(&g_suspend_q.lock);
+    suspend_frame_node_t *cur = g_suspend_q.head;
+    while (cur) {
+        suspend_frame_node_t *nx = cur->next;
+        free(cur);
+        cur = nx;
+    }
+    g_suspend_q.head = g_suspend_q.tail = NULL;
+    g_suspend_q.count = 0;
+    pthread_mutex_unlock(&g_suspend_q.lock);
+}
+
+static int suspend_queue_count(void)
+{
+    pthread_mutex_lock(&g_suspend_q.lock);
+    int c = g_suspend_q.count;
+    pthread_mutex_unlock(&g_suspend_q.lock);
+    return c;
+}
+
+typedef struct {
+    app_context_t *app;
+    volatile int tts_started;
+    volatile int tts_stopped;
+    volatile int disconnected;
+} rem_ws_ctx_t;
+
+static void rem_ws_on_audio(audio_packet_t *packet, void *user_data)
+{
+    rem_ws_ctx_t *ctx = (rem_ws_ctx_t *)user_data;
+    if (!ctx || !ctx->app || !packet || !packet->payload_size) return;
+    audio_player_write_opus(&ctx->app->player, packet->payload, packet->payload_size, 0);
+}
+
+static void rem_ws_on_json(const char *json, size_t len, void *user_data)
+{
+    rem_ws_ctx_t *ctx = (rem_ws_ctx_t *)user_data;
+    if (!ctx || !json || len == 0) return;
+    char type_str[32] = {0};
+    proto_find_json_str(json, len, "type", type_str, sizeof(type_str));
+    if (strcmp(type_str, "tts") == 0) {
+        char state_str[32] = {0};
+        proto_find_json_str(json, len, "state", state_str, sizeof(state_str));
+        if (strcmp(state_str, "start") == 0) {
+            ctx->tts_started = 1;
+        } else if (strcmp(state_str, "stop") == 0) {
+            ctx->tts_stopped = 1;
+        } else if (strcmp(state_str, "sentence_start") == 0) {
+            char t[128] = {0};
+            proto_find_json_str(json, len, "text", t, sizeof(t));
+            PLOG_I("REM-WS", "提醒播报: %s", t);
+        }
+    }
+}
+
+static void rem_ws_on_disc(void *user_data)
+{
+    rem_ws_ctx_t *ctx = (rem_ws_ctx_t *)user_data;
+    if (ctx) ctx->disconnected = 1;
+}
+
+static void *dual_ws_reminder_thread(void *arg)
+{
+    app_context_t *app = (app_context_t *)arg;
+    prctl(PR_SET_NAME, "rem_ws");
+
+    char rem_text[256];
+    snprintf(rem_text, sizeof(rem_text), "%s", app->pending_reminder_text);
+    app->pending_reminder_text[0] = '\0';
+
+    protocol_handler_t *rp = (protocol_handler_t *)calloc(1, sizeof(protocol_handler_t));
+    if (!rp) {
+        app->dual_ws_reminder_done = 1;
+        app->dual_ws_reminder_running = 0;
+        return NULL;
+    }
+
+    protocol_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    if (app->custom_ws_url[0])
+        snprintf(cfg.url, sizeof(cfg.url), "%s", app->custom_ws_url);
+    else
+        snprintf(cfg.url, sizeof(cfg.url), "%s", app->config.ws_url);
+    if (app->config.ws_token[0])
+        snprintf(cfg.token, sizeof(cfg.token), "Bearer %.495s", app->config.ws_token);
+    snprintf(cfg.device_id, sizeof(cfg.device_id), "%s", app->device_mac);
+    snprintf(cfg.client_id, sizeof(cfg.client_id), "%.50s-rem", app->client_id);
+    cfg.sample_rate = 16000;
+    cfg.channels = 1;
+    cfg.frame_duration = 60;
+    cfg.ping_interval_ms = app->ws_ping_interval_ms;
+
+    rem_ws_ctx_t ctx = { .app = app };
+    if (protocol_handler_init(rp, &cfg) != 0) {
+        free(rp);
+        app->dual_ws_reminder_done = 1;
+        app->dual_ws_reminder_running = 0;
+        return NULL;
+    }
+    protocol_handler_set_callbacks(rp, NULL, rem_ws_on_disc, rem_ws_on_audio, rem_ws_on_json, NULL, &ctx);
+
+    PLOG_I("REM-WS", "发起临时提醒 WS 连接: %s", rem_text);
+    if (protocol_handler_connect(rp) == 0) {
+        uint64_t t0 = get_time_ms();
+        while (!rp->hello_received && !ctx.disconnected && g_running && (get_time_ms() - t0 < 5000)) {
+            protocol_handler_poll(rp, 50);
+        }
+        if (rp->hello_received && !ctx.disconnected) {
+            app->player.aborted = false;
+            audio_player_reset_decoder(&app->player);
+            audio_player_start(&app->player);
+            protocol_handler_send_wake_word_detected(rp, rem_text);
+
+            uint64_t t_wait = get_time_ms();
+            while (!ctx.tts_stopped && !ctx.disconnected && g_running && (get_time_ms() - t_wait < 20000)) {
+                protocol_handler_poll(rp, 50);
+            }
+            if (ctx.tts_started) {
+                audio_player_stop_with_wait(&app->player, true);
+            } else {
+                audio_player_stop(&app->player);
+            }
+        }
+        protocol_handler_disconnect(rp);
+    } else {
+        PLOG_W("REM-WS", "临时提醒 WS 连接失败");
+    }
+
+    protocol_handler_destroy(rp);
+    free(rp);
+    PLOG_I("REM-WS", "临时提醒 WS 已关闭，准备恢复旧故事 (缓存=%d帧)", suspend_queue_count());
+    app->dual_ws_reminder_done = 1;
+    app->dual_ws_reminder_running = 0;
+    return NULL;
+}
+
+static void *suspend_drain_thread(void *arg)
+{
+    app_context_t *app = (app_context_t *)arg;
+    prctl(PR_SET_NAME, "tts_drain");
+    g_suspend_q.draining = 1;
+
+    while (g_running && !app->tts_suspended && !app->player.aborted) {
+        suspend_frame_node_t *node = suspend_queue_pop();
+        if (!node) break;
+        audio_player_write_opus(&app->player, node->data, node->len, node->timestamp);
+        free(node);
+    }
+
+    g_suspend_q.draining = 0;
+    PLOG_I("REM-WS", "挂起故事缓存已排空 (suspended_ended=%d)", app->suspended_tts_ended);
+    return NULL;
+}
+
 static void on_proto_audio(audio_packet_t *packet, void *user_data)
 {
     app_context_t *app = (app_context_t *)user_data;
@@ -1084,6 +1301,11 @@ static void on_proto_audio(audio_packet_t *packet, void *user_data)
         return;
 
     tts_audio_count++;
+    if (app->tts_suspended && !app->ignore_tts_audio)
+    {
+        suspend_queue_push(packet->payload, packet->payload_size, packet->timestamp);
+        return;
+    }
 
     if (app->ignore_tts_audio)
     {
@@ -1223,7 +1445,12 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
         }
         else if (strcmp(state_str, "stop") == 0)
         {
-            if (app->ignore_tts_audio)
+            if (app->tts_suspended)
+            {
+                PLOG_I("REM-WS", "挂起期间旧会话 TTS 已全部下发完毕");
+                app->suspended_tts_ended = 1;
+            }
+            else if (app->ignore_tts_audio)
             {
                 PLOG_D("PROTO", "忽略迟到的TTS stop (中止后)");
             }
@@ -2054,6 +2281,9 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         display_ctrl_set_session(0);          /* 会话域息屏: 会话结束恢复亮屏 */
         app->reminder_session_active = 0;
         app->resume_story_after_reminder = 0;
+        app->tts_suspended = 0;
+        app->suspended_tts_ended = 0;
+        suspend_queue_clear();
         music_player_on_idle();
         if (app->resume_music_after_reminder)
         {
@@ -3355,6 +3585,32 @@ int main(int argc, char *argv[])
             app->pending_reminder_text[0] = '\0';
         }
 
+        /* 方案二：临时提醒 WS 播报完成，恢复挂起的故事缓存播放 */
+        if (app->dual_ws_reminder_done)
+        {
+            app->dual_ws_reminder_done = 0;
+            app->reminder_session_active = 0;
+            app->tts_suspended = 0;
+            if (state_machine_get_state(&app->sm) == kStateSpeaking)
+            {
+                app->player.aborted = false;
+                audio_player_reset_decoder(&app->player);
+                audio_player_start(&app->player);
+                if (suspend_queue_count() > 0)
+                {
+                    pthread_t dtid;
+                    pthread_attr_t dattr;
+                    pthread_attr_init(&dattr);
+                    pthread_attr_setstacksize(&dattr, 64 * 1024);
+                    pthread_attr_setdetachstate(&dattr, PTHREAD_CREATE_DETACHED);
+                    pthread_create(&dtid, &dattr, suspend_drain_thread, app);
+                    pthread_attr_destroy(&dattr);
+                }
+                if (app->wakeup.started && !wakeup_is_feed_active(&app->wakeup))
+                    wakeup_resume_feed(&app->wakeup);
+            }
+        }
+
         /* 若有挂起的提醒文本且已回到 Idle，立即发起全新播报会话 */
         if (app->pending_reminder_text[0] &&
             state_machine_get_state(&app->sm) == kStateIdle &&
@@ -3403,57 +3659,37 @@ int main(int argc, char *argv[])
                             PLOG_I("REMINDER", "Idle 自动发起提醒播报会话: %s", rem_title);
                             state_machine_transition(&app->sm, kStateConnecting);
                         }
-                        else if (protocol_handler_is_connected(&app->proto))
+                        else if (rst == kStateSpeaking && !app->dual_ws_reminder_running)
                         {
-                            PLOG_I("REMINDER", "对话中(%s)到点，同会话短词插播提醒: %s",
-                                   state_machine_get_state_name(rst), rem_title);
-                            if (app->recorder_initialized)
-                            {
-                                audio_precache_stop(&app->recorder_mod.precache);
-                                audio_recorder_module_stop_sending(&app->recorder_mod);
-                            }
-                            protocol_handler_clear_send_queue(&app->proto);
-                            if (rst == kStateSpeaking)
-                            {
-                                app->ignore_tts_audio = 1;
-                                app->player.aborted = true;
-                                audio_player_stop(&app->player);
-                                subtitle_interrupt();
-                                app->resume_story_after_reminder = 1;
-                                {
-                                    /* 提取最多24字节完整UTF-8作为续讲锚点，去掉引号换行 */
-                                    const char *s = app->last_spoken_sentence;
-                                    size_t di = 0;
-                                    for (size_t si = 0; s[si] && di < 24; ) {
-                                        unsigned char ch = (unsigned char)s[si];
-                                        size_t clen = (ch < 0x80) ? 1 : ((ch & 0xE0) == 0xC0) ? 2 : ((ch & 0xF0) == 0xE0) ? 3 : 4;
-                                        if (di + clen > 24) break;
-                                        if (ch == '"' || ch == '\'' || ch == '\n' || ch == '\r' || ch == '\\') {
-                                            si += clen;
-                                            continue;
-                                        }
-                                        for (size_t k = 0; k < clen && s[si + k]; k++)
-                                            app->interrupted_story_anchor[di++] = s[si + k];
-                                        si += clen;
-                                    }
-                                    app->interrupted_story_anchor[di] = '\0';
-                                }
-                            }
-                            else
-                            {
-                                app->resume_story_after_reminder = 0;
-                            }
+                            PLOG_I("REMINDER", "Speaking 中到点，挂起旧 WS 缓存并用临时 WS 播报提醒: %s", rem_title);
+                            if (app->wakeup.started && wakeup_is_feed_active(&app->wakeup))
+                                wakeup_pause_feed(&app->wakeup);
                             app->reminder_session_active = 1;
-                            protocol_handler_send_abort(&app->proto, "reminder_triggered");
-                            usleep(50000);
-                            if (rst == kStateSpeaking)
+                            app->tts_suspended = 1;
+                            app->suspended_tts_ended = 0;
+                            app->dual_ws_reminder_running = 1;
+                            app->dual_ws_reminder_done = 0;
+                            suspend_queue_clear();
+                            audio_player_stop(&app->player);
                             {
-                                state_machine_transition(&app->sm, kStateListening);
+                                pthread_t rtid;
+                                pthread_attr_t rattr;
+                                pthread_attr_init(&rattr);
+                                pthread_attr_setstacksize(&rattr, 128 * 1024);
+                                pthread_attr_setdetachstate(&rattr, PTHREAD_CREATE_DETACHED);
+                                if (pthread_create(&rtid, &rattr, dual_ws_reminder_thread, app) != 0) {
+                                    app->tts_suspended = 0;
+                                    app->dual_ws_reminder_running = 0;
+                                    app->reminder_session_active = 0;
+                                }
+                                pthread_attr_destroy(&rattr);
                             }
-                            protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
-                            app->pending_reminder_text[0] = '\0';
                         }
-                    }
+                        else if (rst == kStateListening)
+                        {
+                            PLOG_I("REMINDER", "Listening 中到点，结束当前会话后播报提醒: %s", rem_title);
+                            state_machine_transition(&app->sm, kStateCleaning);
+                        }                    }
                 }
             }
         }
