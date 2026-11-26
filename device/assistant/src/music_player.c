@@ -643,16 +643,43 @@ static void *mp_play_thread(void *arg)
     void *track = NULL;
     int track_hz = 0;
     uint64_t cur_offset = start_offset;
+    int stream_retries = 0;
 
     while (!should_abort_now()) {
         if (in_bytes < MP_IN_BUF_SIZE / 2 && !eof) {
             int n = mp_stream_read(st, in_buf + in_bytes, MP_IN_BUF_SIZE - in_bytes);
             if (n > 0) {
                 in_bytes += (size_t)n;
-            } else if (n == 0) {
-                eof = true;
+                stream_retries = 0;
             } else {
-                break;
+                bool premature = (n < 0) || (st->content_length > 0 && st->body_read < st->content_length);
+                if (premature && !should_abort_now() && stream_retries < 3) {
+                    stream_retries++;
+                    uint64_t next_off = cur_offset + in_bytes;
+                    PLOG_W("MUSIC", "流中断(n=%d, read=%lld/%lld), Range重连(%d/3) offset=%llu",
+                           n, (long long)st->body_read, (long long)st->content_length,
+                           stream_retries, (unsigned long long)next_off);
+                    mp_conn_close(&st->conn);
+                    usleep(400000);
+                    if (mp_stream_open(st, url, next_off) == 0) {
+                        if (next_off > 0 && st->status_code == 200) {
+                            uint64_t to_skip = next_off;
+                            uint8_t skip_buf[2048];
+                            while (to_skip > 0 && !should_abort_now()) {
+                                size_t w = to_skip > sizeof(skip_buf) ? sizeof(skip_buf) : (size_t)to_skip;
+                                int sn = mp_stream_read(st, skip_buf, w);
+                                if (sn <= 0) break;
+                                to_skip -= (uint64_t)sn;
+                            }
+                        }
+                        continue;
+                    }
+                }
+                if (n == 0) {
+                    eof = true;
+                } else {
+                    break;
+                }
             }
         }
 

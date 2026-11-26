@@ -3802,6 +3802,18 @@ int main(int argc, char *argv[])
                                    (unsigned long long)idle_elapsed);
                             wakeup_start(&app->wakeup);
                             app->wakeup_start_time_ms = get_time_ms();
+                            {
+                                static int boot_auto_listen_done = 0;
+                                if (!boot_auto_listen_done && app->ota_config_received &&
+                                    !app->needs_activation && config_manager_check_wifi())
+                                {
+                                    boot_auto_listen_done = 1;
+                                    app->session_start_ms = get_time_ms();
+                                    app->wakeup_greeting_pending = 1;
+                                    PLOG_I("INIT", "开机就绪，自动开启对话监听模式");
+                                    state_machine_transition(&app->sm, kStateConnecting);
+                                }
+                            }
                         }
                         if (app->pending_wakeup)
                         {
