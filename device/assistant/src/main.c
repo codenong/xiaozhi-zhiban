@@ -2338,6 +2338,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
     case kStateConnecting:
         PLOG_I("STATE", "Connecting: 建立云端连接");
         app->mcp.tools_listed = 0;
+        app->start_listening_sent = 0;
         if (music_player_is_playing()) music_player_pause();
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_ACTIVE);
         /* 连接时暂停唤醒词检测 */
@@ -2373,7 +2374,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         display_ctrl_set_session(1);          /* 会话域息屏管理开始计时 */
         if (protocol_handler_is_connected(&app->proto))
         {
-            if (app->listening_mode == LISTENING_MODE_REALTIME && from == kStateSpeaking)
+            if (app->listening_mode == LISTENING_MODE_REALTIME && from == kStateSpeaking && app->start_listening_sent)
             {
                 PLOG_I("STATE", "Realtime模式: Speaking→Listening, 跳过重复start_listening");
             }
@@ -2388,6 +2389,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
             {
                 protocol_handler_send_start_listening(&app->proto,
                     app->listening_mode == LISTENING_MODE_REALTIME ? "realtime" : "auto");
+                app->start_listening_sent = 1;
             }
         }
         if (app->recorder_initialized)
