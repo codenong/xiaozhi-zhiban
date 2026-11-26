@@ -2032,6 +2032,15 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         display_ctrl_set_session(0);          /* 会话域息屏: 会话结束恢复亮屏 */
         app->reminder_session_active = 0;
         music_player_on_idle();
+        if (app->resume_music_after_reminder)
+        {
+            app->resume_music_after_reminder = 0;
+            if (!music_player_has_deferred() && music_player_get_state() == MUSIC_STATE_PAUSED)
+            {
+                PLOG_I("MUSIC", "提醒播报结束，自动从断点恢复播放音乐");
+                music_player_resume(false);
+            }
+        }
         if (from == kStateCleaning)
         {
             do_session_cleanup(app, now, prev_state_enter_time_ms);
@@ -3330,7 +3339,10 @@ int main(int argc, char *argv[])
             config_manager_check_wifi())
         {
             if (music_player_is_playing())
+            {
+                app->resume_music_after_reminder = 1;
                 music_player_pause();
+            }
             app->reminder_session_active = 1;
             app->session_start_ms = get_time_ms();
             PLOG_I("REMINDER", "Idle 发起提醒播报会话");
@@ -3359,7 +3371,10 @@ int main(int argc, char *argv[])
                         if (rst == kStateIdle)
                         {
                             if (music_player_is_playing())
+                            {
+                                app->resume_music_after_reminder = 1;
                                 music_player_pause();
+                            }
                             app->reminder_session_active = 1;
                             app->session_start_ms = now_r;
                             PLOG_I("REMINDER", "Idle 自动发起提醒播报会话: %s", rem_title);

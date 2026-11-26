@@ -97,6 +97,7 @@ typedef struct app_context_t {
     char custom_ws_url[512];
     char pending_reminder_text[256];
     volatile int reminder_session_active;
+    volatile int resume_music_after_reminder;
 } app_context_t;
 
 #endif

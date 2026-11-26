@@ -1,0 +1,6 @@
+unzip ~/Downloads/firmware.zip
+adb push assistant/build/sair /var/upgrade/sair.new
+md5 assistant/build/sair
+adb shell "md5sum /var/upgrade/sair.new"
+adb shell "killall sair 2>/dev/null; mv /var/upgrade/sair.new /var/upgrade/sair && chmod +x /var/upgrade/sair && killall sair 2>/dev/null || true"
+adb shell "kill -9 \$(pidof sair); sleep 2; ps | grep sair"
