@@ -59,6 +59,7 @@ jobs:
           name: firmware
           path: |
             device/assistant/build/sair
+            device/assistant/build/test_ffvp
             device/assistant/build/version.h
             device/xwebd/build/xwebd
             device/xwebd/build/version.h
