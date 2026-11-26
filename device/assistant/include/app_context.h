@@ -99,6 +99,8 @@ typedef struct app_context_t {
     volatile int reminder_session_active;
     volatile int resume_music_after_reminder;
     volatile int resume_story_after_reminder;
+    char last_spoken_sentence[128];
+    char interrupted_story_anchor[64];
 } app_context_t;
 
 #endif

@@ -1247,8 +1247,19 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
                     {
                         PLOG_I("REMINDER", "提醒播报完成，自动发送短词续讲故事");
                         app->resume_story_after_reminder = 0;
+        app->interrupted_story_anchor[0] = '\0';
                         app->reminder_session_active = 0;
-                        protocol_handler_send_wake_word_detected(&app->proto, "接着讲刚才的故事");
+                        if (app->interrupted_story_anchor[0])
+                        {
+                            char resume_cmd[128];
+                            snprintf(resume_cmd, sizeof(resume_cmd), "从%s那里接着讲", app->interrupted_story_anchor);
+                            app->interrupted_story_anchor[0] = '\0';
+                            protocol_handler_send_wake_word_detected(&app->proto, resume_cmd);
+                        }
+                        else
+                        {
+                            protocol_handler_send_wake_word_detected(&app->proto, "接着讲刚才的故事");
+                        }
                     }
                     else
                     {
@@ -1266,6 +1277,10 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
             if (tts_text[0])
             {
                 subtitle_set(SUBTITLE_TYPE_TTS, tts_text);
+                if (!app->reminder_session_active && tts_text[0] != '%')
+                {
+                    snprintf(app->last_spoken_sentence, sizeof(app->last_spoken_sentence), "%s", tts_text);
+                }
             }
         }
     }
@@ -3405,6 +3420,24 @@ int main(int argc, char *argv[])
                                 audio_player_stop(&app->player);
                                 subtitle_interrupt();
                                 app->resume_story_after_reminder = 1;
+                                {
+                                    /* 提取最多24字节完整UTF-8作为续讲锚点，去掉引号换行 */
+                                    const char *s = app->last_spoken_sentence;
+                                    size_t di = 0;
+                                    for (size_t si = 0; s[si] && di < 24; ) {
+                                        unsigned char ch = (unsigned char)s[si];
+                                        size_t clen = (ch < 0x80) ? 1 : ((ch & 0xE0) == 0xC0) ? 2 : ((ch & 0xF0) == 0xE0) ? 3 : 4;
+                                        if (di + clen > 24) break;
+                                        if (ch == '"' || ch == '\'' || ch == '\n' || ch == '\r' || ch == '\\') {
+                                            si += clen;
+                                            continue;
+                                        }
+                                        for (size_t k = 0; k < clen && s[si + k]; k++)
+                                            app->interrupted_story_anchor[di++] = s[si + k];
+                                        si += clen;
+                                    }
+                                    app->interrupted_story_anchor[di] = '\0';
+                                }
                             }
                             else
                             {
