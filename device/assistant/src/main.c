@@ -1660,7 +1660,8 @@ static void on_proto_disconnected(void *user_data)
                state_machine_get_state_name(state));
         if (state == kStateSpeaking && app->player_initialized && !app->player.aborted)
         {
-            audio_player_stop_with_wait(&app->player, true);
+            audio_player_wait_drain(&app->player, 15000);
+            audio_player_stop(&app->player);
             subtitle_finish_typing();
         }
         state_machine_transition(&app->sm, kStateCleaning);

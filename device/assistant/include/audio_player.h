@@ -24,6 +24,8 @@ typedef struct {
 
     pthread_cond_t track_closed_cond;   /* 轨道关闭通知(R-13) */
     timestamp_queue_t *ts_queue;
+    uint64_t play_start_ms;
+    uint64_t total_audio_ms;
 } audio_player_t;
 
 int audio_player_init(audio_player_t *player, int sample_rate, int channels);
@@ -32,6 +34,7 @@ void audio_player_destroy(audio_player_t *player);
 int audio_player_start(audio_player_t *player);
 int audio_player_stop(audio_player_t *player);
 int audio_player_stop_with_wait(audio_player_t *player, bool wait_for_completion);
+void audio_player_wait_drain(audio_player_t *player, int max_wait_ms);
 void audio_player_release_track(audio_player_t *player);
 void audio_player_reset_decoder(audio_player_t *player);
 int audio_player_write_opus(audio_player_t *player, const uint8_t *opus_data, size_t opus_len, uint32_t timestamp);

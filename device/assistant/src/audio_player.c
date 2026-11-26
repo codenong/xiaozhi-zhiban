@@ -20,6 +20,12 @@
 #include <time.h>
 #include <dlfcn.h>
 
+static uint64_t player_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000u);
+}
+
 #include "opus.h"
 
 #define DECODE_BUF_SAMPLES 5760 /* Opus解码输出缓冲区样本数（最大120ms@48kHz） */
@@ -237,6 +243,8 @@ int audio_player_start(audio_player_t *player)
     }
 
     player->playing = true;
+    player->play_start_ms = 0;
+    player->total_audio_ms = 0;
     pthread_mutex_unlock(&player->mutex);
 
     PLOG_I("PLAYER", "已启动播放");
@@ -379,6 +387,11 @@ int audio_player_write_opus(audio_player_t *player, const uint8_t *opus_data, si
         return -1;
     }
 
+    if (player->play_start_ms == 0)
+        player->play_start_ms = player_now_ms();
+    if (player->sample_rate > 0 && samples > 0)
+        player->total_audio_ms += (uint64_t)samples * 1000u / (uint64_t)player->sample_rate;
+
     /* 分块将int16转换为int32并写入播放轨道 */
     int offset = 0;
     while (offset < samples)
@@ -473,6 +486,9 @@ void audio_player_reset_decoder(audio_player_t *player)
     {
         audio_track_flush(player->track_handle);
     }
+
+    player->play_start_ms = 0;
+    player->total_audio_ms = 0;
 
     /* 清空时间戳队列 */
     if (player->ts_queue)
@@ -590,4 +606,33 @@ int audio_player_set_volume(audio_player_t *player, int volume)
     int ret = audio_track_set_volume(player->track_handle, track_vol);
     pthread_mutex_unlock(&player->mutex);
     return ret;
+}
+
+void audio_player_wait_drain(audio_player_t *player, int max_wait_ms)
+{
+    if (!player) return;
+    pthread_mutex_lock(&player->mutex);
+    uint64_t start_ms = player->play_start_ms;
+    uint64_t total_ms = player->total_audio_ms;
+    bool open = (player->track_handle && player->track_open);
+    pthread_mutex_unlock(&player->mutex);
+
+    if (!open || start_ms == 0 || total_ms == 0)
+        return;
+
+    uint64_t now = player_now_ms();
+    uint64_t elapsed = (now > start_ms) ? (now - start_ms) : 0;
+    int64_t rem_ms = (total_ms > elapsed) ? (int64_t)(total_ms - elapsed) : 0;
+    rem_ms += 400; /* 硬件 DMA 缓冲余量 */
+    if (max_wait_ms > 0 && rem_ms > max_wait_ms)
+        rem_ms = max_wait_ms;
+
+    PLOG_I("PLAYER", "精确等待尾音排空: total=%llums elapsed=%llums wait=%lldms",
+           (unsigned long long)total_ms, (unsigned long long)elapsed, (long long)rem_ms);
+
+    int waited = 0;
+    while (waited < rem_ms && !player->aborted) {
+        usleep(50000);
+        waited += 50;
+    }
 }
