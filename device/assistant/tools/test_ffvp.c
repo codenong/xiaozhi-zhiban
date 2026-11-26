@@ -92,29 +92,45 @@ int main(void)
     /* feed 真实语音 3ch 流(/var/upgrade/feed3ch.raw, 含唤醒词+说话) */
     printf("[diag] pre-fopen\n"); fflush(stdout);
     FILE *f = fopen("/var/upgrade/feed3ch.raw", "rb");
-    if (!f) { printf("feed3ch.raw 缺失\n"); return 1; }
-    printf("[diag] file open, will feed\n"); fflush(stdout);
+    int synthetic = (f == NULL);
+    printf("[diag] source=%s\n", synthetic ? "synthetic(50 frames)" : "/var/upgrade/feed3ch.raw");
+    fflush(stdout);
     static short pcm[1024 * 3]; /* 原生块尺寸: 1024 样本x3ch = 6144B */
     int frames = 0, frames_with_data = 0;
     long total_out = 0;
     int fr = 0;
-    while (fread(pcm, 1, sizeof(pcm), f) == sizeof(pcm))
+    while (synthetic ? (fr < 50) : (fread(pcm, 1, sizeof(pcm), f) == sizeof(pcm)))
     {
-        printf("[diag] feed frame %d\n", fr); fflush(stdout);
+        if (synthetic) {
+            for (int i = 0; i < 1024; i++) {
+                int idx = fr * 1024 + i;
+                short ref_echo = (short)(6000.0 * sin(2.0 * 3.1415926 * 440.0 * idx / 16000.0));
+                short voice = (fr >= 20) ? (short)(3000.0 * sin(2.0 * 3.1415926 * 1000.0 * idx / 16000.0)) : 0;
+                pcm[i * 3 + 0] = ref_echo + voice;
+                pcm[i * 3 + 1] = ref_echo + voice;
+                pcm[i * 3 + 2] = ref_echo;
+            }
+        }
         feed(eng, pcm, sizeof(pcm));
-        printf("[diag] feed ok\n"); fflush(stdout);
         usleep(64000); /* 1024 样本 = 64ms 实时节奏 */
         static short ffvp_out[2048];
         int n = ffr(eng, ffvp_out, sizeof(ffvp_out));
         int vn = vdr ? vdr(eng, ffvp_out, sizeof(ffvp_out)) : -1;
-        if (fr % 5 == 1) printf("帧%d ffvp=%d vad=%d\n", fr, n, vn);
-        if (n > 0) { frames_with_data++; total_out += n; }
-        if (fr % 5 == 0)
-            printf("帧%d(%ds): ffvp_read=%d\n", fr, fr * 3072 / 16000, n);
+        if (n > 0) {
+            frames_with_data++;
+            total_out += n;
+            long sum = 0;
+            int ns = n / 2;
+            for (int k = 0; k < ns; k++) sum += (long)ffvp_out[k] * ffvp_out[k];
+            int rms = ns > 0 ? (int)sqrt((double)sum / ns) : 0;
+            printf("帧%d ffvp=%dB rms=%d vad=%d\n", fr, n, rms, vn);
+        } else if (fr % 10 == 0) {
+            printf("帧%d ffvp=%d vad=%d\n", fr, n, vn);
+        }
         frames++;
         fr++;
     }
-    fclose(f);
+    if (f) fclose(f);
     printf("总帧=%d 有数据帧=%d 累计字节=%ld\n", frames, frames_with_data, total_out);
     printf("[keepalive] 30s 观察窗 (pid=%d)\n", (int)getpid());
     fflush(stdout);
