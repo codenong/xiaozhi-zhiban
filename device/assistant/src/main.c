@@ -2367,6 +2367,8 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         }
         break;
     case kStateListening:
+        app->recorder_mod.noise_gate_thresh = 0;
+        app->recorder_mod.gate_hold_frames = 0;
         PLOG_I("STATE", "Listening: 等待用户语音 (唤醒后+%llums)",
                (unsigned long long)(get_time_ms() - app->session_start_ms));
         if (music_player_is_playing()) music_player_pause();
@@ -2419,6 +2421,17 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         }
         break;
     case kStateSpeaking:
+        {
+            int gate = 600;
+            FILE *gfp = fopen("/var/upgrade/.speak_gate", "r");
+            if (gfp) {
+                int v = 0;
+                if (fscanf(gfp, "%d", &v) == 1 && v >= 0) gate = v;
+                fclose(gfp);
+            }
+            app->recorder_mod.noise_gate_thresh = gate;
+            app->recorder_mod.gate_hold_frames = 0;
+        }
         PLOG_I("STATE", "Speaking: 播放TTS语音 (模式=%s)",
                app->listening_mode == LISTENING_MODE_REALTIME ? "realtime" : "autostop");
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_ACTIVE);

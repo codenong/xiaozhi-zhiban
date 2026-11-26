@@ -49,6 +49,34 @@ static void rec_dump_sample(int16_t ch0, int16_t ch1, int16_t ref, int16_t post)
 
 static void do_encode_send(audio_recorder_module_t *rec)
 {
+    int gate = rec->noise_gate_thresh;
+    if (gate > 0 && rec->frame_count > 0)
+    {
+        long long sum = 0;
+        for (int i = 0; i < rec->frame_count; i++)
+        {
+            int v = rec->mic_sample_buf[i];
+            sum += (v < 0) ? -v : v;
+        }
+        int avg = (int)(sum / rec->frame_count);
+        if (avg >= gate)
+        {
+            if (rec->gate_hold_frames == 0)
+            {
+                PLOG_D("REC", "近场门控开启: avg=%d >= gate=%d", avg, gate);
+            }
+            rec->gate_hold_frames = 8; /* 8 * 60ms = 480ms 防词尾截断 */
+        }
+        else if (rec->gate_hold_frames > 0)
+        {
+            rec->gate_hold_frames--;
+        }
+        else
+        {
+            memset(rec->mic_sample_buf, 0, (size_t)rec->frame_count * sizeof(int16_t));
+        }
+    }
+
     int opus_len = opus_encode((OpusEncoder *)rec->opus_encoder,
                                rec->mic_sample_buf,
                                rec->frame_count,

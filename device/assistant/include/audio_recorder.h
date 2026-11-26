@@ -27,6 +27,8 @@ typedef struct {
 
     volatile bool sending;
     volatile bool use_ffvp;
+    volatile int noise_gate_thresh;
+    int gate_hold_frames;
     audio_precache_t precache;
     pthread_mutex_t mutex;
 } audio_recorder_module_t;
