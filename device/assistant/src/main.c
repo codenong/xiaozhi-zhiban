@@ -1457,9 +1457,9 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
         }
         else if (strcmp(state_str, "stop") == 0)
         {
-            if (app->tts_suspended)
+            if (app->tts_suspended || g_suspend_q.draining)
             {
-                PLOG_I("REM-WS", "挂起期间旧会话 TTS 已全部下发完毕");
+                PLOG_I("REM-WS", "挂起/排空期间旧会话 TTS 已全部下发完毕");
                 app->suspended_tts_ended = 1;
             }
             else if (app->ignore_tts_audio)
