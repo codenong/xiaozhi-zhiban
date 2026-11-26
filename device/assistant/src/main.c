@@ -1295,6 +1295,7 @@ static void *suspend_drain_thread(void *arg)
             pthread_mutex_unlock(&g_suspend_q.lock);
             break;
         }
+        app->last_tts_audio_ms = get_time_ms();
         audio_player_write_opus(&app->player, node->data, node->len, node->timestamp);
         free(node);
     }
@@ -2485,8 +2486,9 @@ static void check_timeouts(app_context_t *app)
     /* 会话总超时检查（Speaking状态下TTS活跃时暂停计时） */
     if (app->in_session && now - app->session_start_ms > g_app.session_timeout_ms)
     {
-        if (state == kStateSpeaking && app->last_tts_audio_ms > 0
-            && now - app->last_tts_audio_ms < SPEAK_TIMEOUT_MS)
+        if (state == kStateSpeaking &&
+            (app->tts_suspended || g_suspend_q.draining || app->dual_ws_reminder_running ||
+             (app->last_tts_audio_ms > 0 && now - app->last_tts_audio_ms < SPEAK_TIMEOUT_MS)))
         {
             app->session_start_ms = now - g_app.session_timeout_ms;
         }
@@ -2584,7 +2586,8 @@ static void check_timeouts(app_context_t *app)
 
     case kStateSpeaking:
         /* 说话超时（TTS数据活跃时持续刷新） */
-        if (app->last_tts_audio_ms > 0 && now - app->last_tts_audio_ms < SPEAK_TIMEOUT_MS)
+        if (app->tts_suspended || g_suspend_q.draining || app->dual_ws_reminder_running ||
+            (app->last_tts_audio_ms > 0 && now - app->last_tts_audio_ms < SPEAK_TIMEOUT_MS))
         {
             app->state_enter_time_ms = now - SPEAK_TIMEOUT_MS;
         }
