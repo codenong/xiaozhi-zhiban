@@ -1658,6 +1658,11 @@ static void on_proto_disconnected(void *user_data)
     {
         PLOG_I("PROTO", "云端在 %s 状态断开, 结束会话",
                state_machine_get_state_name(state));
+        if (state == kStateSpeaking && app->player_initialized && !app->player.aborted)
+        {
+            audio_player_stop_with_wait(&app->player, true);
+            subtitle_finish_typing();
+        }
         state_machine_transition(&app->sm, kStateCleaning);
         return;
     }
