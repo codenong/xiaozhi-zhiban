@@ -177,8 +177,8 @@ fi
 
 echo ""
 echo "Building test_ffvp probe..."
-$CC --sysroot=$SYSROOT -Wall -Os -g0 -mcpu=cortex-a5 -mfloat-abi=soft -no-pie -rdynamic \
-    "$PROJECT_DIR/tools/test_ffvp.c" -ldl -lm -o "$BUILD_DIR/test_ffvp"
+$CC --sysroot=$SYSROOT -Wall -Os -g0 -mcpu=cortex-a5 -mfloat-abi=soft -no-pie -rdynamic -Wl,--no-as-needed \
+    "$PROJECT_DIR/tools/test_ffvp.c" -lpthread -ldl -lm -o "$BUILD_DIR/test_ffvp"
 $STRIP --strip-unneeded "$BUILD_DIR/test_ffvp" 2>/dev/null || true
 
 echo "=== Build successful! ===" 
