@@ -2491,7 +2491,7 @@ static void check_timeouts(app_context_t *app)
     xiaozhi_state_t state = state_machine_get_state(&app->sm);
 
     /* 会话总超时检查（Speaking状态下TTS活跃时暂停计时） */
-    if (app->in_session && now - app->session_start_ms > g_app.session_timeout_ms)
+    if (app->listening_mode != LISTENING_MODE_REALTIME && app->in_session && now - app->session_start_ms > g_app.session_timeout_ms)
     {
         if (state == kStateSpeaking &&
             (app->tts_suspended || g_suspend_q.draining || app->dual_ws_reminder_running ||
@@ -2584,7 +2584,7 @@ static void check_timeouts(app_context_t *app)
 
     case kStateListening:
         /* 监听超时 */
-        if (now - app->state_enter_time_ms > g_app.listen_timeout_ms)
+        if (app->listening_mode != LISTENING_MODE_REALTIME && now - app->state_enter_time_ms > g_app.listen_timeout_ms)
         {
             PLOG_W("TIMEOUT", "监听超时");
             state_machine_transition(&app->sm, kStateCleaning);
@@ -3172,7 +3172,7 @@ int main(int argc, char *argv[])
     /* 默认 AutoStop(2026-08-29 用户决策): Realtime 依赖的本地 NLMS 回声消除
      * 效果有限(X14 终论: 原生持续 AEC 输出接口不存在, 软方案已达上限),
      * Realtime 双讲场景回声残留影响体验; AutoStop 打断走唤醒词更可靠. */
-    g_app.listening_mode = LISTENING_MODE_AUTOSTOP;
+    g_app.listening_mode = LISTENING_MODE_REALTIME;
     app->precache_enabled = read_precache_enabled();
     PLOG_I("INIT", "音频预缓存: %s", app->precache_enabled ? "已启用" : "已禁用");
     read_custom_ws_url(app->custom_ws_url, sizeof(app->custom_ws_url));
