@@ -1,6 +1,35 @@
-unzip ~/Downloads/firmware.zip
-adb push assistant/build/sair /var/upgrade/sair.new
-md5 assistant/build/sair
-adb shell "md5sum /var/upgrade/sair.new"
+#!/bin/bash
+set -e
+
+ZIP_PATH="$HOME/Downloads/firmware.zip"
+LOCAL_BIN="assistant/build/sair"
+
+unzip -o "$ZIP_PATH"
+
+if [ ! -f "$LOCAL_BIN" ]; then
+  echo "❌ 未找到 $LOCAL_BIN，请检查压缩包内容！"
+  exit 1
+fi
+
+LOCAL_MD5=$(md5 -q "$LOCAL_BIN")
+REMOTE_MD5=$(adb shell "md5sum /var/upgrade/sair 2>/dev/null" | awk '{print $1}' | tr -d '\r')
+
+echo "本地 MD5: $LOCAL_MD5"
+echo "设备 MD5: ${REMOTE_MD5:-<不存在>}"
+
+if [ "$LOCAL_MD5" = "$REMOTE_MD5" ]; then
+  echo "⚠️  本地与设备上的 sair 完全一致，请检查是否下载错了 firmware.zip！"
+  exit 1
+fi
+
+echo "检测到新版本，开始推送更新..."
+adb push "$LOCAL_BIN" /var/upgrade/sair.new
+
+NEW_REMOTE_MD5=$(adb shell "md5sum /var/upgrade/sair.new" | awk '{print $1}' | tr -d '\r')
+if [ "$LOCAL_MD5" != "$NEW_REMOTE_MD5" ]; then
+  echo "❌ 上传校验失败 (设备端: $NEW_REMOTE_MD5)，中止覆盖！"
+  exit 1
+fi
+
 adb shell "killall sair 2>/dev/null; mv /var/upgrade/sair.new /var/upgrade/sair && chmod +x /var/upgrade/sair && killall sair 2>/dev/null || true"
-adb shell "kill -9 \$(pidof sair); sleep 2; ps | grep sair"
+adb shell "PID=\$(pidof sair); [ -n \"\$PID\" ] && kill -9 \$PID 2>/dev/null || true; sleep 2; ps | grep sair"

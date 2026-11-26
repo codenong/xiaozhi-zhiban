@@ -1243,6 +1243,13 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
                         PLOG_I("MUSIC", "TTS 播完且有待播音乐，结束会话进入 Idle 起播");
                         state_machine_transition(&app->sm, kStateCleaning);
                     }
+                    else if (app->resume_story_after_reminder && protocol_handler_is_connected(&app->proto))
+                    {
+                        PLOG_I("REMINDER", "提醒播报完成，自动发送短词续讲故事");
+                        app->resume_story_after_reminder = 0;
+                        app->reminder_session_active = 0;
+                        protocol_handler_send_wake_word_detected(&app->proto, "接着讲刚才的故事");
+                    }
                     else
                     {
                         app->reminder_session_active = 0;
@@ -2031,6 +2038,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_IDLE);
         display_ctrl_set_session(0);          /* 会话域息屏: 会话结束恢复亮屏 */
         app->reminder_session_active = 0;
+        app->resume_story_after_reminder = 0;
         music_player_on_idle();
         if (app->resume_music_after_reminder)
         {
@@ -3380,18 +3388,37 @@ int main(int argc, char *argv[])
                             PLOG_I("REMINDER", "Idle 自动发起提醒播报会话: %s", rem_title);
                             state_machine_transition(&app->sm, kStateConnecting);
                         }
-                        else
+                        else if (protocol_handler_is_connected(&app->proto))
                         {
-                            PLOG_I("REMINDER", "对话中(%s)到点，干净结束当前会话后播报提醒: %s",
+                            PLOG_I("REMINDER", "对话中(%s)到点，同会话短词插播提醒: %s",
                                    state_machine_get_state_name(rst), rem_title);
+                            if (app->recorder_initialized)
+                            {
+                                audio_precache_stop(&app->recorder_mod.precache);
+                                audio_recorder_module_stop_sending(&app->recorder_mod);
+                            }
+                            protocol_handler_clear_send_queue(&app->proto);
                             if (rst == kStateSpeaking)
                             {
                                 app->ignore_tts_audio = 1;
                                 app->player.aborted = true;
                                 audio_player_stop(&app->player);
                                 subtitle_interrupt();
+                                app->resume_story_after_reminder = 1;
                             }
-                            state_machine_transition(&app->sm, kStateCleaning);
+                            else
+                            {
+                                app->resume_story_after_reminder = 0;
+                            }
+                            app->reminder_session_active = 1;
+                            protocol_handler_send_abort(&app->proto, "reminder_triggered");
+                            usleep(50000);
+                            if (rst == kStateSpeaking)
+                            {
+                                state_machine_transition(&app->sm, kStateListening);
+                            }
+                            protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
+                            app->pending_reminder_text[0] = '\0';
                         }
                     }
                 }
