@@ -26,6 +26,7 @@ typedef struct {
     uint8_t opus_output_buf[RECORDER_OPUS_BUF_SIZE];
 
     volatile bool sending;
+    volatile bool use_ffvp;
     audio_precache_t precache;
     pthread_mutex_t mutex;
 } audio_recorder_module_t;
@@ -38,5 +39,6 @@ void audio_recorder_module_destroy(audio_recorder_module_t *rec);
 int audio_recorder_module_start_sending(audio_recorder_module_t *rec);
 int audio_recorder_module_stop_sending(audio_recorder_module_t *rec);
 bool audio_recorder_module_is_sending(audio_recorder_module_t *rec);
+void audio_recorder_module_feed_ffvp(audio_recorder_module_t *rec, const int16_t *pcm, int samples);
 
 #endif

@@ -934,6 +934,11 @@ static void broadcast_sair_end(void)
  * @param wakeup_type 唤醒类型
  * @param user_data 用户数据，传入app_context_t指针
  */
+static void on_ffvp_audio_cb(const int16_t *pcm, int samples, void *user_data)
+{
+    audio_recorder_module_feed_ffvp((audio_recorder_module_t *)user_data, pcm, samples);
+}
+
 static void on_wakeup_event(int wakeup_type, void *user_data)
 {
     app_context_t *app = (app_context_t *)user_data;
@@ -3326,6 +3331,11 @@ int main(int argc, char *argv[])
     /* 初始化唤醒词检测模块 */
     ret = wakeup_init(&app->wakeup, &app->audio_disp, on_wakeup_event, app);
     PLOG_I("INIT", "wakeup_init 返回值=%d", ret);
+    if (ret == 0 && app->wakeup.ffvp_enabled && app->recorder_initialized) {
+        app->recorder_mod.use_ffvp = true;
+        wakeup_set_ffvp_callback(&app->wakeup, on_ffvp_audio_cb, &app->recorder_mod);
+        PLOG_I("INIT", "已启用原生 FFVP (AEC+波束成形) 上行通道");
+    }
     heap_check("post-wakeup");
 
     /* 初始化触摸按键模块 */

@@ -19,6 +19,10 @@ typedef struct {
     asr_start_t       f_asr_start;
     asr_stop_t        f_asr_stop;
     asr_feed_data_t   f_asr_feed_data;
+    int (*f_asr_ffvp_read)(void* handle, void* buf, int size);
+    volatile int ffvp_enabled;
+    void (*on_ffvp_audio)(const int16_t* pcm, int samples, void* user_data);
+    void* ffvp_user_data;
 
     void (*on_wakeup)(int wakeup_type, void* user_data);
     void* wakeup_user_data;
@@ -36,5 +40,6 @@ void wakeup_pause_feed(wakeup_module_t* mod);
 void wakeup_resume_feed(wakeup_module_t* mod);
 int wakeup_is_feed_active(wakeup_module_t* mod);
 void wakeup_destroy(wakeup_module_t* mod);
+void wakeup_set_ffvp_callback(wakeup_module_t* mod, void (*cb)(const int16_t* pcm, int samples, void* user_data), void* user_data);
 
 #endif

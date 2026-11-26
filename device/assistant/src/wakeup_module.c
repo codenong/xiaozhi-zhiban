@@ -218,6 +218,10 @@ static void asr_callback(int event_type, int result)
         mod->asr_init_done = 1;
         break;
     case ASR_EVENT_WAKEUP:
+        if (mod->paused) {
+            PLOG_D("ASR", "paused 状态下忽略唤醒事件 type=%d", result);
+            break;
+        }
         PLOG_I("ASR", "检测到唤醒! type=%d", result);
         if (mod->on_wakeup)
         {
@@ -258,13 +262,12 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
     static unsigned long s_cb_cnt = 0;
     static unsigned long s_skip_cnt = 0;
     s_cb_cnt++;
-    if (!mod || mod->paused || !mod->started || !mod->asr_handle) {
+    if (!mod || !mod->started || !mod->asr_handle) {
         s_skip_cnt++;
-        if (s_skip_cnt % 250 == 1) {
-            PLOG_D("WAKEUP-DIAG", "音频跳过 #%lu: paused=%d started=%d handle=%p",
-                   s_skip_cnt, mod ? mod->paused : -1, mod ? mod->started : -1,
-                   mod ? mod->asr_handle : NULL);
-        }
+        return;
+    }
+    if (mod->paused && !(mod->ffvp_enabled && mod->on_ffvp_audio)) {
+        s_skip_cnt++;
         return;
     }
     if (s_cb_cnt % 250 == 1) {
@@ -303,6 +306,13 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
         if (frames > 0)
             mod->f_asr_feed_data(mod->asr_handle, aligned,
                                  frames * 3 * sizeof(int16_t)); /* 字节数(9fb80 反汇编定论: len 累加进写pos) */
+        if (frames > 0 && mod->ffvp_enabled && mod->f_asr_ffvp_read && mod->on_ffvp_audio) {
+            static int16_t s_ffvp_buf[2048];
+            int rbytes;
+            while ((rbytes = mod->f_asr_ffvp_read(mod->asr_handle, s_ffvp_buf, sizeof(s_ffvp_buf))) > 0) {
+                mod->on_ffvp_audio(s_ffvp_buf, rbytes / 2, mod->ffvp_user_data);
+            }
+        }
 
         s_residual_n = total - frames * 3;
         if (s_residual_n > 0)
@@ -377,6 +387,7 @@ int wakeup_init(wakeup_module_t *mod, audio_dispatcher_t *disp,
     mod->f_asr_start = (asr_start_t)dlsym(mod->asr_lib, "asr_engine_start");
     mod->f_asr_stop = (asr_stop_t)dlsym(mod->asr_lib, "asr_engine_stop");
     mod->f_asr_feed_data = (asr_feed_data_t)dlsym(mod->asr_lib, "asr_engine_feed_data");
+    mod->f_asr_ffvp_read = (int (*)(void*, void*, int))dlsym(mod->asr_lib, "asr_engine_ffvp_read");
 
     /* 检查所有必要符号是否解析成功 */
     if (!mod->f_asr_set_params || !mod->f_asr_init || !mod->f_asr_start ||
@@ -438,6 +449,13 @@ int wakeup_init(wakeup_module_t *mod, audio_dispatcher_t *disp,
         return -1;
     }
     PLOG_I("WAKEUP", "asr_engine_init成功, handle=%p", mod->asr_handle);
+    if (mod->f_asr_ffvp_read) {
+        int ffvp_on = 1;
+        if (mod->f_asr_set_params(4, sizeof(int), &ffvp_on) == 0) {
+            mod->ffvp_enabled = 1;
+            PLOG_I("WAKEUP", "已开启原生 FFVP (AEC+波束成形) 输出");
+        }
+    }
 
     mod->initialized = 1;
     g_wakeup_mod = mod;
@@ -607,4 +625,13 @@ void wakeup_destroy(wakeup_module_t *mod)
         dlclose(mod->asr_lib);
         mod->asr_lib = NULL;
     }
+}
+
+void wakeup_set_ffvp_callback(wakeup_module_t* mod,
+                              void (*cb)(const int16_t* pcm, int samples, void* user_data),
+                              void* user_data)
+{
+    if (!mod) return;
+    mod->on_ffvp_audio = cb;
+    mod->ffvp_user_data = user_data;
 }

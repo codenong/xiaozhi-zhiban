@@ -80,6 +80,7 @@ static void on_audio_data(const int16_t *data, int len, void *user_data)
     if (!rec)
         return;
 
+    if (rec->use_ffvp) return;
     if (!rec->sending && !audio_precache_is_active(&rec->precache))
         return; /* (Q7 诊断统计已移除, 2026-08-31: 每5s一条常驻日志写NAND, 发烫贡献源) */
 
@@ -257,4 +258,23 @@ bool audio_recorder_module_is_sending(audio_recorder_module_t *rec)
     if (!rec)
         return false;
     return rec->sending;
+}
+
+void audio_recorder_module_feed_ffvp(audio_recorder_module_t *rec, const int16_t *pcm, int samples)
+{
+    if (!rec || !pcm || samples <= 0)
+        return;
+    if (!rec->sending && !audio_precache_is_active(&rec->precache))
+        return;
+
+    pthread_mutex_lock(&rec->mutex);
+    for (int i = 0; i < samples; i++)
+    {
+        rec->mic_sample_buf[rec->frame_count++] = pcm[i];
+        if (rec->frame_count >= RECORDER_FRAME_SIZE)
+        {
+            do_encode_send(rec);
+        }
+    }
+    pthread_mutex_unlock(&rec->mutex);
 }
