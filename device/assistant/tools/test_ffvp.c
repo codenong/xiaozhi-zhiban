@@ -120,11 +120,15 @@ int main(void)
         if (n > 0) {
             frames_with_data++;
             total_out += n;
-            long sum = 0;
+            long long sum = 0;
             int ns = n / 2;
-            for (int k = 0; k < ns; k++) sum += (long)ffvp_out[k] * ffvp_out[k];
-            int rms = ns > 0 ? (int)sqrt((double)sum / ns) : 0;
-            printf("帧%d ffvp=%dB rms=%d vad=%d\n", fr, n, rms, vn);
+            for (int k = 0; k < ns; k++) {
+                int v = ffvp_out[k];
+                sum += (v < 0) ? -v : v;
+            }
+            int avg = ns > 0 ? (int)(sum / ns) : 0;
+            printf("帧%d ffvp=%dB avg_abs=%d [%d,%d,%d,%d] vad=%d\n",
+                   fr, n, avg, ffvp_out[0], ffvp_out[1], ffvp_out[2], ffvp_out[3], vn);
         } else if (fr % 10 == 0) {
             printf("帧%d ffvp=%d vad=%d\n", fr, n, vn);
         }
@@ -133,14 +137,13 @@ int main(void)
     }
     if (f) fclose(f);
     printf("总帧=%d 有数据帧=%d 累计字节=%ld\n", frames, frames_with_data, total_out);
-    printf("[keepalive] 30s 观察窗 (pid=%d)\n", (int)getpid());
-    fflush(stdout);
-    for (int i = 0; i < 30; i++)
     {
-        sleep(1);
-        static short ffvp_out2[2048];
-        int n2 = ffr(eng, ffvp_out2, sizeof(ffvp_out2));
-        if (n2 > 0) { printf("[keepalive] %ds: ffvp_read=%d!\n", i, n2); fflush(stdout); }
+        typedef int (*asr_stop_t)(void*);
+        asr_stop_t stp = (asr_stop_t)dlsym(lib, "asr_engine_stop");
+        asr_stop_t fin = (asr_stop_t)dlsym(lib, "asr_engine_finalize");
+        if (stp) stp(eng);
+        if (fin) fin(eng);
     }
+    printf("clean exit ok\n");
     return 0;
 }
