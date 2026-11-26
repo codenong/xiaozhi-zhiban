@@ -77,8 +77,9 @@ int main(void)
 
     /* 原生顺序(sair.asm 14bc8-14bf4): init 之后才 set_params(2,4,{2,1}).
      * 昨晚崩溃根因: 在 init 前调用 type=2 破坏未初始化的全局引擎结构. */
-    int ffvp_on[1] = {2};
-    printf("set_params(2,4,{2}) ret=%d\n", setp ? setp(2, 4, ffvp_on) : -1);
+    int ffvp_on = 1;
+    printf("set_params(4,4,{1}) ret=%d\n", setp ? setp(4, 4, &ffvp_on) : -1);
+    printf("set_params(5,4,{1}) ret=%d\n", setp ? setp(5, 4, &ffvp_on) : -1);
 
     /* engine 结构关键字段 dump: +0(回调)/+40(ffvp缓冲)/+44(vad缓冲)/+152/+176/+180 */
     unsigned int *E = (unsigned int *)eng;
