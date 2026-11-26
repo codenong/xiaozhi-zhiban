@@ -105,6 +105,7 @@ typedef struct app_context_t {
     volatile int suspended_tts_ended;
     volatile int dual_ws_reminder_running;
     volatile int dual_ws_reminder_done;
+    volatile int wakeup_greeting_pending;
 } app_context_t;
 
 #endif

@@ -2300,6 +2300,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         app->reminder_session_active = 0;
         app->resume_story_after_reminder = 0;
         app->tts_suspended = 0;
+        app->wakeup_greeting_pending = 0;
         app->suspended_tts_ended = 0;
         suspend_queue_clear();
         music_player_on_idle();
@@ -2370,7 +2371,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
             {
                 PLOG_I("STATE", "Realtime模式: Speaking→Listening, 跳过重复start_listening");
             }
-            else if (app->pending_reminder_text[0])
+            else if (app->pending_reminder_text[0] || app->wakeup_greeting_pending)
             {
                 /* 等待 MCP tools/list 完成后在主循环发送触发，避免云端握手期丢弃 */
                 if (app->wakeup.started && wakeup_is_feed_active(&app->wakeup))
@@ -2713,6 +2714,7 @@ static void process_pending_wakeup(app_context_t *app)
 
     broadcast_sair_awake(app->pending_wakeup_type);
 
+    app->wakeup_greeting_pending = 1;
     state_machine_transition(&app->sm, kStateConnecting);
 }
 
@@ -3601,6 +3603,18 @@ int main(int argc, char *argv[])
         {
             protocol_handler_send_wake_word_detected(&app->proto, app->pending_reminder_text);
             app->pending_reminder_text[0] = '\0';
+        }
+
+        /* 唤醒拟人化应答：等 MCP tools/list 完成后发送短词触发 LLM 回应（如“哎，我在呢”） */
+        if (app->wakeup_greeting_pending &&
+            !app->pending_reminder_text[0] &&
+            state_machine_get_state(&app->sm) == kStateListening &&
+            app->mcp.tools_listed &&
+            protocol_handler_is_connected(&app->proto))
+        {
+            app->wakeup_greeting_pending = 0;
+            PLOG_I("WAKEUP", "发送唤醒拟人化应答触发");
+            protocol_handler_send_wake_word_detected(&app->proto, "在吗");
         }
 
         /* 方案二：若旧故事在挂起期间已下发完毕且缓存已排空，结束 Speaking 进 Listening */

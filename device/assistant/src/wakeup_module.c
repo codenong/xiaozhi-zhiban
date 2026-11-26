@@ -130,24 +130,16 @@ static int load_config(void)
                 sizeof(g_main_wake_word) - 1);
     }
 
-    /* 读取主唤醒词阈值，缺失时使用默认0.30（提高灵敏度） */
+    /* 读取主唤醒词阈值，适当放宽至 0.20 以提升远场唤醒灵敏度 */
     ret = get_config("MAIN_WAKE_THRESH", g_main_wake_thresh, sizeof(g_main_wake_thresh));
-    if (ret < 0 || g_main_wake_thresh[0] == '\0' || strcmp(g_main_wake_thresh, "0.5") == 0)
+    if (ret < 0 || g_main_wake_thresh[0] == '\0' || atof(g_main_wake_thresh) > 0.22)
     {
-        strncpy(g_main_wake_thresh, "0.30", sizeof(g_main_wake_thresh) - 1);
+        strncpy(g_main_wake_thresh, "0.20", sizeof(g_main_wake_thresh) - 1);
     }
 
     /* 读取可选的自定义唤醒词和本地命令词配置 */
     get_config("CUSTOM_WAKE_WORD", g_custom_wake_word, sizeof(g_custom_wake_word));
     get_config("CUSTOM_WAKE_THRESH", g_custom_wake_thresh, sizeof(g_custom_wake_thresh));
-    if (g_custom_wake_word[0] == '\0')
-    {
-        strncpy(g_custom_wake_word, "xiao zhi xiao zhi", sizeof(g_custom_wake_word) - 1);
-    }
-    if (g_custom_wake_thresh[0] == '\0')
-    {
-        strncpy(g_custom_wake_thresh, "0.30", sizeof(g_custom_wake_thresh) - 1);
-    }
     get_config("LOCAL_COMMAND_WORD", g_local_command_word, sizeof(g_local_command_word));
     get_config("LOCAL_COMMAND_THRESH", g_local_command_thresh, sizeof(g_local_command_thresh));
 
@@ -269,7 +261,7 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
     if (!mod || mod->paused || !mod->started || !mod->asr_handle) {
         s_skip_cnt++;
         if (s_skip_cnt % 250 == 1) {
-            PLOG_I("WAKEUP-DIAG", "音频跳过 #%lu: paused=%d started=%d handle=%p",
+            PLOG_D("WAKEUP-DIAG", "音频跳过 #%lu: paused=%d started=%d handle=%p",
                    s_skip_cnt, mod ? mod->paused : -1, mod ? mod->started : -1,
                    mod ? mod->asr_handle : NULL);
         }
@@ -285,7 +277,7 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
             n_samp++;
         }
         int avg_abs = n_samp > 0 ? (int)(sum_abs / n_samp) : 0;
-        PLOG_I("WAKEUP-DIAG", "喂流正常 #%lu: len=%d avg_abs=%d", s_cb_cnt, len, avg_abs);
+        PLOG_D("WAKEUP-DIAG", "喂流正常 #%lu: len=%d avg_abs=%d", s_cb_cnt, len, avg_abs);
     }
     if (mod->f_asr_feed_data)
     {
