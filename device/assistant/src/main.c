@@ -43,6 +43,8 @@
 
 #include "reverse/applib_api.h"
 #include "reverse/audio_recorder_api.h"
+#include "reverse/audio_service_api.h"
+#include "platform_power.h"
 #include "xiaozhi_config.h"
 #include "state_machine.h"
 #include "watchdog.h"
@@ -2380,7 +2382,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
             {
                 PLOG_I("STATE", "Realtime模式: Speaking→Listening, 跳过重复start_listening");
             }
-            else if (app->pending_reminder_text[0] || app->wakeup_greeting_pending)
+            else if (app->pending_reminder_text[0])
             {
                 /* 等待 MCP tools/list 完成后在主循环发送触发，避免云端握手期丢弃 */
                 if (app->wakeup.started && wakeup_is_feed_active(&app->wakeup))
@@ -2640,6 +2642,75 @@ static void check_timeouts(app_context_t *app)
  *        - Idle: 开始新会话
  * @param app 应用上下文指针
  */
+static void *local_wakeup_chime_thread(void *arg)
+{
+    (void)arg;
+    prctl(PR_SET_NAME, "xz_chime", 0, 0, 0);
+
+    const int sr = 16000;
+    const int n1 = (sr * 70) / 1000;   /* 70ms @ 880Hz */
+    const int n2 = (sr * 110) / 1000;  /* 110ms @ 1174.66Hz */
+    const int total = n1 + n2;
+    int32_t *buf = (int32_t *)calloc((size_t)total, sizeof(int32_t));
+    if (!buf)
+        return NULL;
+
+    for (int i = 0; i < n1; i++)
+    {
+        double env = 1.0;
+        if (i < 160) env = (double)i / 160.0;
+        else if (i > n1 - 160) env = (double)(n1 - i) / 160.0;
+        buf[i] = (int32_t)(7500.0 * env * sin(2.0 * 3.14159265358979 * 880.0 * i / sr));
+    }
+    for (int i = 0; i < n2; i++)
+    {
+        double env = 1.0;
+        if (i < 160) env = (double)i / 160.0;
+        else env = (double)(n2 - i) / (double)n2;
+        buf[n1 + i] = (int32_t)(7500.0 * env * sin(2.0 * 3.14159265358979 * 1174.66 * i / sr));
+    }
+
+    void *track = audio_track_create(NULL);
+    if (track)
+    {
+        if (audio_track_init(track, 1, sr, AUDIO_TRACK_TYPE_MUSIC) == 0 &&
+            audio_track_play(track) == 0)
+        {
+            audio_track_write_params_t params;
+            memset(&params, 0, sizeof(params));
+            params.channel_data[0] = buf;
+            params.num_channels = 1;
+            params.num_samples = total;
+            params.shift_bits = 0;
+            audio_track_write_data(track, &params);
+            audio_track_flush(track);
+            audio_track_stop(track);
+        }
+        audio_track_delete(track);
+    }
+    free(buf);
+    return NULL;
+}
+
+static void play_local_wakeup_sound(void)
+{
+    if (platform_media_play_file("/var/upgrade/wakeup.mp3") == 0)
+        return;
+    if (platform_media_play_file("/var/upgrade/wakeup.wav") == 0)
+        return;
+
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 32 * 1024);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&tid, &attr, local_wakeup_chime_thread, NULL) != 0)
+    {
+        PLOG_W("WAKEUP", "创建本地唤醒提示音线程失败");
+    }
+    pthread_attr_destroy(&attr);
+}
+
 static void process_pending_wakeup(app_context_t *app)
 {
     /* 先判事件再进闸门: use_limit 拦截含播提示音副作用, 若放在 pending
@@ -2686,6 +2757,7 @@ static void process_pending_wakeup(app_context_t *app)
                 app->listening_mode == LISTENING_MODE_REALTIME ? "realtime" : "auto");
         }
         broadcast_sair_awake(app->pending_wakeup_type);
+        play_local_wakeup_sound();
         if (app->recorder_initialized && app->precache_enabled
             && app->listening_mode != LISTENING_MODE_REALTIME)
         {
@@ -2737,7 +2809,7 @@ static void process_pending_wakeup(app_context_t *app)
 
     broadcast_sair_awake(app->pending_wakeup_type);
 
-    app->wakeup_greeting_pending = 1;
+    play_local_wakeup_sound();
     state_machine_transition(&app->sm, kStateConnecting);
 }
 
@@ -3633,17 +3705,6 @@ int main(int argc, char *argv[])
             app->pending_reminder_text[0] = '\0';
         }
 
-        /* 唤醒拟人化应答：等 MCP tools/list 完成后发送短词触发 LLM 回应（如“哎，我在呢”） */
-        if (app->wakeup_greeting_pending &&
-            !app->pending_reminder_text[0] &&
-            state_machine_get_state(&app->sm) == kStateListening &&
-            app->mcp.tools_listed &&
-            protocol_handler_is_connected(&app->proto))
-        {
-            app->wakeup_greeting_pending = 0;
-            PLOG_I("WAKEUP", "发送唤醒拟人化应答触发");
-            protocol_handler_send_wake_word_detected(&app->proto, "在吗");
-        }
 
         /* 方案二：若旧故事在挂起期间已下发完毕且缓存已排空，结束 Speaking 进 Listening */
         if (app->suspended_tts_ended && !app->tts_suspended && !g_suspend_q.draining &&
@@ -3822,7 +3883,6 @@ int main(int argc, char *argv[])
                                 {
                                     boot_auto_listen_done = 1;
                                     app->session_start_ms = get_time_ms();
-                                    app->wakeup_greeting_pending = 1;
                                     PLOG_I("INIT", "开机就绪，自动开启对话监听模式");
                                     state_machine_transition(&app->sm, kStateConnecting);
                                 }
