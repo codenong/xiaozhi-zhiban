@@ -1283,13 +1283,25 @@ static void *suspend_drain_thread(void *arg)
     g_suspend_q.draining = 1;
 
     while (g_running && !app->tts_suspended && !app->player.aborted) {
-        suspend_frame_node_t *node = suspend_queue_pop();
-        if (!node) break;
+        pthread_mutex_lock(&g_suspend_q.lock);
+        suspend_frame_node_t *node = g_suspend_q.head;
+        if (node) {
+            g_suspend_q.head = node->next;
+            if (!g_suspend_q.head) g_suspend_q.tail = NULL;
+            g_suspend_q.count--;
+            pthread_mutex_unlock(&g_suspend_q.lock);
+        } else {
+            g_suspend_q.draining = 0;
+            pthread_mutex_unlock(&g_suspend_q.lock);
+            break;
+        }
         audio_player_write_opus(&app->player, node->data, node->len, node->timestamp);
         free(node);
     }
 
+    pthread_mutex_lock(&g_suspend_q.lock);
     g_suspend_q.draining = 0;
+    pthread_mutex_unlock(&g_suspend_q.lock);
     PLOG_I("REM-WS", "挂起故事缓存已排空 (suspended_ended=%d)", app->suspended_tts_ended);
     return NULL;
 }
@@ -1301,7 +1313,7 @@ static void on_proto_audio(audio_packet_t *packet, void *user_data)
         return;
 
     tts_audio_count++;
-    if (app->tts_suspended && !app->ignore_tts_audio)
+    if ((app->tts_suspended || g_suspend_q.draining) && !app->ignore_tts_audio)
     {
         suspend_queue_push(packet->payload, packet->payload_size, packet->timestamp);
         return;
@@ -3585,6 +3597,17 @@ int main(int argc, char *argv[])
             app->pending_reminder_text[0] = '\0';
         }
 
+        /* 方案二：若旧故事在挂起期间已下发完毕且缓存已排空，结束 Speaking 进 Listening */
+        if (app->suspended_tts_ended && !app->tts_suspended && !g_suspend_q.draining &&
+            state_machine_get_state(&app->sm) == kStateSpeaking)
+        {
+            app->suspended_tts_ended = 0;
+            audio_player_stop_with_wait(&app->player, app->listening_mode != LISTENING_MODE_REALTIME);
+            subtitle_finish_typing();
+            subtitle_schedule_hide(SUBTITLE_HIDE_MS);
+            state_machine_transition(&app->sm, kStateListening);
+        }
+
         /* 方案二：临时提醒 WS 播报完成，恢复挂起的故事缓存播放 */
         if (app->dual_ws_reminder_done)
         {
@@ -3598,12 +3621,14 @@ int main(int argc, char *argv[])
                 audio_player_start(&app->player);
                 if (suspend_queue_count() > 0)
                 {
+                    g_suspend_q.draining = 1;
                     pthread_t dtid;
                     pthread_attr_t dattr;
                     pthread_attr_init(&dattr);
                     pthread_attr_setstacksize(&dattr, 64 * 1024);
                     pthread_attr_setdetachstate(&dattr, PTHREAD_CREATE_DETACHED);
-                    pthread_create(&dtid, &dattr, suspend_drain_thread, app);
+                    if (pthread_create(&dtid, &dattr, suspend_drain_thread, app) != 0)
+                        g_suspend_q.draining = 0;
                     pthread_attr_destroy(&dattr);
                 }
                 if (app->wakeup.started && !wakeup_is_feed_active(&app->wakeup))
