@@ -435,12 +435,12 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
         }
         if (frames > 0 && mod->ffvp_enabled && mod->f_asr_ffvp_read && mod->on_ffvp_audio) {
             static int16_t s_ffvp_buf[2048];
-            static int s_duck_gate = 140;
+            static int s_duck_gate = 200;
             static int s_duck_hits = 0;
             static unsigned long s_duck_log_tick = 0;
             if ((s_diag_tick % 50) == 1)
             {
-                int g = 140;
+                int g = 200;
                 FILE *dfp = fopen("/var/upgrade/.music_duck_gate", "r");
                 if (dfp)
                 {
@@ -470,7 +470,7 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
                     if (favg >= s_duck_gate)
                     {
                         s_duck_hits++;
-                        if (s_duck_hits >= 2)
+                        if (s_duck_hits >= 5)
                         {
                             music_player_duck(2500);
                             if (s_diag_tick - s_duck_log_tick > 60)
