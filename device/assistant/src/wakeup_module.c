@@ -97,6 +97,25 @@ int get_config(const char *key, char *value, int value_size)
         }
         else if (strcmp(key, "MAIN_WAKE_THRESH") == 0)
         {
+            FILE *tfp = fopen("/var/upgrade/.wake_thresh", "r");
+            if (tfp)
+            {
+                char tline[32] = {0};
+                if (fgets(tline, sizeof(tline), tfp))
+                {
+                    size_t tl = strlen(tline);
+                    while (tl > 0 && (tline[tl - 1] == '\n' || tline[tl - 1] == '\r' || tline[tl - 1] == ' '))
+                        tline[--tl] = '\0';
+                    if (tl > 0)
+                    {
+                        snprintf(value, (size_t)value_size, "%s", tline);
+                        fclose(tfp);
+                        PLOG_I("WAKEUP", "get_config(MAIN_WAKE_THRESH) 覆盖为 '%s'", value);
+                        return 0;
+                    }
+                }
+                fclose(tfp);
+            }
             if (access("/var/upgrade/.wake_word", R_OK) == 0)
             {
                 snprintf(value, (size_t)value_size, "0.20");
