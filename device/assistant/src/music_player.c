@@ -597,6 +597,13 @@ static int mp_stream_read(mp_http_stream_t *st, uint8_t *buf, size_t max_len)
     return n;
 }
 
+static uint64_t mp_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
+
 /* ---- 播放线程 ---- */
 
 static void *mp_play_thread(void *arg)
@@ -857,13 +864,6 @@ cleanup:
 }
 
 /* ---- 对外接口 ---- */
-
-static uint64_t mp_now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
-}
 
 static void stop_thread_sync(bool as_pause)
 {
