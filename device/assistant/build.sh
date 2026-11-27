@@ -162,6 +162,7 @@ $CC --sysroot=$SYSROOT \
     -lopus \
     -lpthread -lrt -ldl -lm \
     -lapplib -lapconfig -lconfigpart -laudio_service_api -laudio_recorder -ldds \
+    -Wl,--export-dynamic \
     -Wl,--unresolved-symbols=ignore-all \
     -o "$BUILD_DIR/sair"
 

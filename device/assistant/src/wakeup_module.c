@@ -52,6 +52,64 @@ static char g_dcheck_config[256] = {0};
 /* 商城模式标志 */
 static int g_malls_mode = 0;
 
+/* 拦截 libapconfig.so 的 get_config，使闭源 libsair_asr.so 也能读到 .wake_word */
+int get_config(const char *key, char *value, int value_size)
+{
+    typedef int (*real_get_config_t)(const char *, char *, int);
+    static real_get_config_t s_real_get_config = NULL;
+    static int s_init_done = 0;
+
+    if (!s_init_done)
+    {
+        s_init_done = 1;
+        void *h = dlopen("libapconfig.so", RTLD_LAZY);
+        if (h)
+        {
+            real_get_config_t fn = (real_get_config_t)dlsym(h, "get_config");
+            if (fn && fn != get_config)
+                s_real_get_config = fn;
+        }
+    }
+
+    if (key && value && value_size > 0)
+    {
+        if (strcmp(key, "MAIN_WAKE_WORD") == 0)
+        {
+            FILE *wfp = fopen("/var/upgrade/.wake_word", "r");
+            if (wfp)
+            {
+                char line[128] = {0};
+                if (fgets(line, sizeof(line), wfp))
+                {
+                    size_t l = strlen(line);
+                    while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r' || line[l - 1] == ' '))
+                        line[--l] = '\0';
+                    if (l > 0)
+                    {
+                        snprintf(value, (size_t)value_size, "%s", line);
+                        fclose(wfp);
+                        PLOG_I("WAKEUP", "get_config(MAIN_WAKE_WORD) 覆盖为 '%s'", value);
+                        return 0;
+                    }
+                }
+                fclose(wfp);
+            }
+        }
+        else if (strcmp(key, "MAIN_WAKE_THRESH") == 0)
+        {
+            if (access("/var/upgrade/.wake_word", R_OK) == 0)
+            {
+                snprintf(value, (size_t)value_size, "0.20");
+                return 0;
+            }
+        }
+    }
+
+    if (s_real_get_config)
+        return s_real_get_config(key, value, value_size);
+    return -1;
+}
+
 /* 全局唤醒模块实例指针，供ASR回调使用（volatile防止编译器优化） */
 static volatile wakeup_module_t *g_wakeup_mod = NULL;
 
