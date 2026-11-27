@@ -60,6 +60,7 @@ typedef struct {
     bool stop_req;
     bool pause_req;
     bool defer_start;
+    bool natural_end;
 
     char url[MP_URL_MAX];
     char title[MP_TITLE_MAX];
@@ -831,13 +832,15 @@ cleanup:
     pthread_mutex_lock(&g_mp.lock);
     if (g_mp.pause_req) {
         g_mp.state = MUSIC_STATE_PAUSED;
+        g_mp.natural_end = false;
         PLOG_I("MUSIC", "已暂停: offset=%llu, played=%llums",
                (unsigned long long)g_mp.resume_bytes, (unsigned long long)g_mp.played_ms);
     } else {
+        g_mp.natural_end = !g_mp.stop_req;
         g_mp.state = MUSIC_STATE_STOPPED;
         g_mp.resume_bytes = 0;
         g_mp.played_ms = 0;
-        PLOG_I("MUSIC", "播放结束或已停止");
+        PLOG_I("MUSIC", "播放结束或已停止 (natural=%d)", g_mp.natural_end ? 1 : 0);
     }
     g_mp.thread_running = false;
     g_mp.stop_req = false;
@@ -885,6 +888,7 @@ static int start_play_thread(void)
     pthread_mutex_lock(&g_mp.lock);
     g_mp.stop_req = false;
     g_mp.pause_req = false;
+    g_mp.natural_end = false;
     g_mp.thread_running = true;
     int r = pthread_create(&g_mp.thread, &attr, mp_play_thread, NULL);
     if (r != 0) {
@@ -1036,4 +1040,15 @@ void music_player_get_status(char *buf, size_t size)
              names[st], g_mp.title[0] ? g_mp.title : "none",
              (unsigned long long)(g_mp.played_ms / 1000));
     pthread_mutex_unlock(&g_mp.lock);
+}
+
+bool music_player_take_natural_end(void)
+{
+    if (!g_mp.initialized)
+        return false;
+    pthread_mutex_lock(&g_mp.lock);
+    bool v = g_mp.natural_end;
+    g_mp.natural_end = false;
+    pthread_mutex_unlock(&g_mp.lock);
+    return v;
 }

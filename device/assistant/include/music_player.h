@@ -23,6 +23,7 @@ int music_player_stop(void);
 void music_player_on_idle(void);
 bool music_player_is_playing(void);
 bool music_player_has_deferred(void);
+bool music_player_take_natural_end(void);
 music_state_t music_player_get_state(void);
 void music_player_get_status(char *buf, size_t size);
 

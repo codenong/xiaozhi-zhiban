@@ -1671,6 +1671,7 @@ static void on_proto_disconnected(void *user_data)
             audio_player_wait_drain(&app->player, 15000);
             audio_player_stop(&app->player);
             subtitle_finish_typing();
+            app->auto_relisten_on_idle = 1;
         }
         state_machine_transition(&app->sm, kStateCleaning);
         return;
@@ -3895,6 +3896,20 @@ int main(int argc, char *argv[])
                             app->pending_wakeup_type = 0;
                         }
                     }
+                }
+            }
+            if (cur_state == kStateIdle && app->wakeup.started &&
+                app->ota_config_received && !app->needs_activation &&
+                !app->pending_reminder_text[0] && config_manager_check_wifi())
+            {
+                bool music_done = music_player_take_natural_end();
+                if (music_done || app->auto_relisten_on_idle)
+                {
+                    app->auto_relisten_on_idle = 0;
+                    app->session_start_ms = get_time_ms();
+                    PLOG_I("STATE", "%s结束，自动开启对话监听模式",
+                           music_done ? "歌曲播放" : "长语音播报");
+                    state_machine_transition(&app->sm, kStateConnecting);
                 }
             }
             /* 唤醒feed自愈(2026-08-30): 异常会话(如云端瞬时断开)的状态转换
