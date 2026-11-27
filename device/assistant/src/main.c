@@ -3885,6 +3885,7 @@ int main(int argc, char *argv[])
                                     boot_auto_listen_done = 1;
                                     app->session_start_ms = get_time_ms();
                                     PLOG_I("INIT", "开机就绪，自动开启对话监听模式");
+                                    play_local_wakeup_sound();
                                     state_machine_transition(&app->sm, kStateConnecting);
                                 }
                             }
@@ -3909,6 +3910,7 @@ int main(int argc, char *argv[])
                     app->session_start_ms = get_time_ms();
                     PLOG_I("STATE", "%s结束，自动开启对话监听模式",
                            music_done ? "歌曲播放" : "长语音播报");
+                    play_local_wakeup_sound();
                     state_machine_transition(&app->sm, kStateConnecting);
                 }
             }
