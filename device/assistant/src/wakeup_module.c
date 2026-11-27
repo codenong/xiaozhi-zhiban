@@ -141,7 +141,7 @@ static int load_config(void)
     get_config("CUSTOM_WAKE_WORD", g_custom_wake_word, sizeof(g_custom_wake_word));
     get_config("CUSTOM_WAKE_THRESH", g_custom_wake_thresh, sizeof(g_custom_wake_thresh));
 
-    /* 支持 /var/upgrade/.wake_word 覆盖自定义唤醒词，默认启用 xiao zhi xiao zhi */
+    /* 支持 /var/upgrade/.wake_word 直接覆盖主唤醒词(走 major=1 主通道) */
     {
         FILE *wfp = fopen("/var/upgrade/.wake_word", "r");
         if (wfp)
@@ -154,19 +154,13 @@ static int load_config(void)
                     line[--l] = '\0';
                 if (l > 0)
                 {
-                    strncpy(g_custom_wake_word, line, sizeof(g_custom_wake_word) - 1);
-                    g_custom_wake_word[sizeof(g_custom_wake_word) - 1] = '\0';
+                    strncpy(g_main_wake_word, line, sizeof(g_main_wake_word) - 1);
+                    g_main_wake_word[sizeof(g_main_wake_word) - 1] = '\0';
+                    strncpy(g_main_wake_thresh, "0.20", sizeof(g_main_wake_thresh) - 1);
+                    g_custom_wake_word[0] = '\0';
                 }
             }
             fclose(wfp);
-        }
-        if (g_custom_wake_word[0] == '\0')
-        {
-            strncpy(g_custom_wake_word, "xiao zhi xiao zhi", sizeof(g_custom_wake_word) - 1);
-        }
-        if (g_custom_wake_thresh[0] == '\0')
-        {
-            strncpy(g_custom_wake_thresh, "0.20", sizeof(g_custom_wake_thresh) - 1);
         }
     }
     get_config("LOCAL_COMMAND_WORD", g_local_command_word, sizeof(g_local_command_word));
@@ -259,6 +253,10 @@ static void asr_callback(int event_type, int result)
         break;
     case ASR_EVENT_DIFF_WORD:
         PLOG_I("ASR", "差异化唤醒词: result=%d", result);
+        if (!mod->paused && mod->on_wakeup)
+        {
+            mod->on_wakeup(result, mod->wakeup_user_data);
+        }
         break;
     case ASR_EVENT_VAD_CHANGE:
         PLOG_D("ASR", "VAD状态变化: result=%d", result);
