@@ -11,6 +11,7 @@
  */
 
 #include "wakeup_module.h"
+#include "music_player.h"
 #include "xiaozhi_config.h"
 #include "reverse/sair_asr_api.h"
 #include "reverse/applib_api.h"
@@ -434,17 +435,59 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
         }
         if (frames > 0 && mod->ffvp_enabled && mod->f_asr_ffvp_read && mod->on_ffvp_audio) {
             static int16_t s_ffvp_buf[2048];
+            static int s_duck_gate = 140;
+            static int s_duck_hits = 0;
+            static unsigned long s_duck_log_tick = 0;
+            if ((s_diag_tick % 50) == 1)
+            {
+                int g = 140;
+                FILE *dfp = fopen("/var/upgrade/.music_duck_gate", "r");
+                if (dfp)
+                {
+                    int v = 0;
+                    if (fscanf(dfp, "%d", &v) == 1 && v >= 0) g = v;
+                    fclose(dfp);
+                }
+                s_duck_gate = g;
+            }
             int rbytes;
             while ((rbytes = mod->f_asr_ffvp_read(mod->asr_handle, s_ffvp_buf, sizeof(s_ffvp_buf))) > 0) {
                 int ns = rbytes / 2;
+                long long sum_f = 0;
+                for (int i = 0; i < ns; i++)
+                {
+                    int vf = s_ffvp_buf[i];
+                    sum_f += (vf < 0) ? -vf : vf;
+                }
                 if (s_diag_on)
                 {
-                    for (int i = 0; i < ns; i++)
-                    {
-                        int vf = s_ffvp_buf[i];
-                        s_d_ffvp += (vf < 0) ? -vf : vf;
-                    }
+                    s_d_ffvp += sum_f;
                     s_d_out_n += ns;
+                }
+                if (!mod->paused && s_duck_gate > 0 && ns > 0 && music_player_is_playing())
+                {
+                    int favg = (int)(sum_f / ns);
+                    if (favg >= s_duck_gate)
+                    {
+                        s_duck_hits++;
+                        if (s_duck_hits >= 2)
+                        {
+                            music_player_duck(2500);
+                            if (s_diag_tick - s_duck_log_tick > 60)
+                            {
+                                s_duck_log_tick = s_diag_tick;
+                                PLOG_I("WAKEUP", "放歌中检测到人声(ffvp=%d>=%d)，音乐闪避 2.5s", favg, s_duck_gate);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        s_duck_hits = 0;
+                    }
+                }
+                else
+                {
+                    s_duck_hits = 0;
                 }
                 mod->on_ffvp_audio(s_ffvp_buf, ns, mod->ffvp_user_data);
             }

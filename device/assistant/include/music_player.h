@@ -21,6 +21,7 @@ int music_player_resume(bool defer_start);
 int music_player_stop(void);
 
 void music_player_on_idle(void);
+void music_player_duck(int duration_ms);
 bool music_player_is_playing(void);
 bool music_player_has_deferred(void);
 bool music_player_take_natural_end(void);

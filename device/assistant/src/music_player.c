@@ -25,6 +25,7 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <time.h>
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -61,6 +62,7 @@ typedef struct {
     bool pause_req;
     bool defer_start;
     bool natural_end;
+    uint64_t duck_until_ms;
 
     char url[MP_URL_MAX];
     char title[MP_TITLE_MAX];
@@ -786,14 +788,17 @@ static void *mp_play_thread(void *arg)
             if (chunk > MP_S32_BUF_SAMPLES)
                 chunk = MP_S32_BUF_SAMPLES;
 
+            bool duck = (g_mp.duck_until_ms > 0 && mp_now_ms() < g_mp.duck_until_ms);
             if (info.channels == 2) {
                 for (int i = 0; i < chunk; i++) {
                     int idx = (offset + i) * 2;
-                    s32_buf[i] = ((int32_t)pcm_buf[idx] + (int32_t)pcm_buf[idx + 1]) / 2;
+                    int32_t v = ((int32_t)pcm_buf[idx] + (int32_t)pcm_buf[idx + 1]) / 2;
+                    s32_buf[i] = duck ? (v >> 2) : v;
                 }
             } else {
                 for (int i = 0; i < chunk; i++) {
-                    s32_buf[i] = (int32_t)pcm_buf[offset + i];
+                    int32_t v = (int32_t)pcm_buf[offset + i];
+                    s32_buf[i] = duck ? (v >> 2) : v;
                 }
             }
 
@@ -833,6 +838,7 @@ cleanup:
     if (g_mp.pause_req) {
         g_mp.state = MUSIC_STATE_PAUSED;
         g_mp.natural_end = false;
+    g_mp.duck_until_ms = 0;
         PLOG_I("MUSIC", "已暂停: offset=%llu, played=%llums",
                (unsigned long long)g_mp.resume_bytes, (unsigned long long)g_mp.played_ms);
     } else {
@@ -851,6 +857,13 @@ cleanup:
 }
 
 /* ---- 对外接口 ---- */
+
+static uint64_t mp_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
 
 static void stop_thread_sync(bool as_pause)
 {
@@ -1051,4 +1064,13 @@ bool music_player_take_natural_end(void)
     g_mp.natural_end = false;
     pthread_mutex_unlock(&g_mp.lock);
     return v;
+}
+
+void music_player_duck(int duration_ms)
+{
+    if (!g_mp.initialized || duration_ms <= 0)
+        return;
+    uint64_t until = mp_now_ms() + (uint64_t)duration_ms;
+    if (until > g_mp.duck_until_ms)
+        g_mp.duck_until_ms = until;
 }
