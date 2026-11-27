@@ -140,6 +140,35 @@ static int load_config(void)
     /* 读取可选的自定义唤醒词和本地命令词配置 */
     get_config("CUSTOM_WAKE_WORD", g_custom_wake_word, sizeof(g_custom_wake_word));
     get_config("CUSTOM_WAKE_THRESH", g_custom_wake_thresh, sizeof(g_custom_wake_thresh));
+
+    /* 支持 /var/upgrade/.wake_word 覆盖自定义唤醒词，默认启用 xiao zhi xiao zhi */
+    {
+        FILE *wfp = fopen("/var/upgrade/.wake_word", "r");
+        if (wfp)
+        {
+            char line[64] = {0};
+            if (fgets(line, sizeof(line), wfp))
+            {
+                size_t l = strlen(line);
+                while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r' || line[l - 1] == ' '))
+                    line[--l] = '\0';
+                if (l > 0)
+                {
+                    strncpy(g_custom_wake_word, line, sizeof(g_custom_wake_word) - 1);
+                    g_custom_wake_word[sizeof(g_custom_wake_word) - 1] = '\0';
+                }
+            }
+            fclose(wfp);
+        }
+        if (g_custom_wake_word[0] == '\0')
+        {
+            strncpy(g_custom_wake_word, "xiao zhi xiao zhi", sizeof(g_custom_wake_word) - 1);
+        }
+        if (g_custom_wake_thresh[0] == '\0')
+        {
+            strncpy(g_custom_wake_thresh, "0.20", sizeof(g_custom_wake_thresh) - 1);
+        }
+    }
     get_config("LOCAL_COMMAND_WORD", g_local_command_word, sizeof(g_local_command_word));
     get_config("LOCAL_COMMAND_THRESH", g_local_command_thresh, sizeof(g_local_command_thresh));
 
