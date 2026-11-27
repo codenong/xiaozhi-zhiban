@@ -407,15 +407,55 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
         total += len;
 
         int frames = total / 3; /* 1 样本 = 3ch 交织 */
+        static int s_diag_on = 0;
+        static unsigned long s_diag_tick = 0;
+        static long long s_d_m0 = 0, s_d_m1 = 0, s_d_ref = 0, s_d_ffvp = 0;
+        static int s_d_in_n = 0, s_d_out_n = 0;
+        if ((s_diag_tick++ % 50) == 0)
+            s_diag_on = (access("/var/upgrade/.rec_dump", F_OK) == 0);
+
         if (frames > 0)
+        {
+            if (s_diag_on)
+            {
+                for (int i = 0; i < frames; i++)
+                {
+                    int v0 = aligned[i * 3 + 0];
+                    int v1 = aligned[i * 3 + 1];
+                    int vr = aligned[i * 3 + 2];
+                    s_d_m0 += (v0 < 0) ? -v0 : v0;
+                    s_d_m1 += (v1 < 0) ? -v1 : v1;
+                    s_d_ref += (vr < 0) ? -vr : vr;
+                }
+                s_d_in_n += frames;
+            }
             mod->f_asr_feed_data(mod->asr_handle, aligned,
                                  frames * 3 * sizeof(int16_t)); /* 字节数(9fb80 反汇编定论: len 累加进写pos) */
+        }
         if (frames > 0 && mod->ffvp_enabled && mod->f_asr_ffvp_read && mod->on_ffvp_audio) {
             static int16_t s_ffvp_buf[2048];
             int rbytes;
             while ((rbytes = mod->f_asr_ffvp_read(mod->asr_handle, s_ffvp_buf, sizeof(s_ffvp_buf))) > 0) {
-                mod->on_ffvp_audio(s_ffvp_buf, rbytes / 2, mod->ffvp_user_data);
+                int ns = rbytes / 2;
+                if (s_diag_on)
+                {
+                    for (int i = 0; i < ns; i++)
+                    {
+                        int vf = s_ffvp_buf[i];
+                        s_d_ffvp += (vf < 0) ? -vf : vf;
+                    }
+                    s_d_out_n += ns;
+                }
+                mod->on_ffvp_audio(s_ffvp_buf, ns, mod->ffvp_user_data);
             }
+        }
+        if (s_diag_on && s_d_in_n >= 16000)
+        {
+            PLOG_I("FFVP-DIAG", "mic0=%lld mic1=%lld ref=%lld ffvp=%lld",
+                   s_d_m0 / s_d_in_n, s_d_m1 / s_d_in_n, s_d_ref / s_d_in_n,
+                   s_d_out_n > 0 ? (s_d_ffvp / s_d_out_n) : -1LL);
+            s_d_m0 = s_d_m1 = s_d_ref = s_d_ffvp = 0;
+            s_d_in_n = s_d_out_n = 0;
         }
 
         s_residual_n = total - frames * 3;
