@@ -1443,6 +1443,11 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
         {
             PLOG_I("PROTO", "TTS 开始");
             app->ignore_tts_audio = 0;
+            if (app->music_grace_deadline_ms > 0)
+            {
+                app->music_grace_deadline_ms = 0;
+                if (app->music_grace_deadline_ms == 0 && music_player_is_playing()) music_player_pause();
+            }
             /* 新 TTS 段开始: 取消挂起的自动清屏(连续对话场景) */
             pthread_mutex_lock(&g_subtitle_mutex);
             g_subtitle_hide_ms = 0;
@@ -1487,8 +1492,16 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
                 {
                     if (music_player_has_deferred() || app->resume_music_after_reminder)
                     {
-                        PLOG_I("MUSIC", "TTS 播完且有待播音乐，结束会话进入 Idle 起播");
-                        state_machine_transition(&app->sm, kStateCleaning);
+                        PLOG_I("MUSIC", "TTS 播完且有待播音乐，立即起播并保持监听 10s");
+                        app->music_grace_deadline_ms = get_time_ms() + 10000;
+                        state_machine_transition(&app->sm, kStateListening);
+                        music_player_on_idle();
+                        if (app->resume_music_after_reminder && !music_player_has_deferred() &&
+                            music_player_get_state() == MUSIC_STATE_PAUSED)
+                        {
+                            music_player_resume(false);
+                        }
+                        app->resume_music_after_reminder = 0;
                     }
                     else if (app->resume_story_after_reminder && protocol_handler_is_connected(&app->proto))
                     {
@@ -1538,6 +1551,11 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
         char stt_text[SUBTITLE_MAX_LEN] = {0};
         proto_find_json_str(json, len, "text", stt_text, sizeof(stt_text));
         PLOG_I("PROTO", "STT %s text='%.64s'", state_str, stt_text);
+        if (stt_text[0] && app->music_grace_deadline_ms > 0)
+        {
+            app->music_grace_deadline_ms = 0;
+            if (music_player_is_playing()) music_player_pause();
+        }
         if (stt_text[0])
         {
             subtitle_set(SUBTITLE_TYPE_ASR, stt_text);
@@ -2339,6 +2357,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         }
         break;
     case kStateConnecting:
+        app->music_grace_deadline_ms = 0;
         PLOG_I("STATE", "Connecting: 建立云端连接");
         app->mcp.tools_listed = 0;
         app->start_listening_sent = 0;
@@ -2458,6 +2477,7 @@ static void on_state_changed(xiaozhi_state_t from, xiaozhi_state_t to, void *use
         }
         break;
     case kStateCleaning:
+        app->music_grace_deadline_ms = 0;
         PLOG_I("STATE", "Cleaning: 释放会话资源");
         watchdog_set_timeout(&app->watchdog, WD_TIMEOUT_ACTIVE);
         app->connecting = 0;
@@ -2622,7 +2642,17 @@ static void check_timeouts(app_context_t *app)
         break;
 
     case kStateCleaning:
-        /* 清理超时（pending_cleaning_done未触发时强制回到Idle） */
+        if (app->music_grace_deadline_ms > 0 && get_time_ms() >= app->music_grace_deadline_ms)
+    {
+        app->music_grace_deadline_ms = 0;
+        if (state_machine_get_state(&app->sm) == kStateListening)
+        {
+            PLOG_I("MUSIC", "放歌前10秒监听窗口到期，关闭WS进入Idle");
+            state_machine_transition(&app->sm, kStateCleaning);
+        }
+    }
+
+    /* 清理超时（pending_cleaning_done未触发时强制回到Idle） */
         if (now - app->state_enter_time_ms > CLEANUP_TIMEOUT_MS)
         {
             PLOG_W("TIMEOUT", "清理超时 (pending_cleaning_done 未触发?), 强制回到 Idle");

@@ -107,6 +107,7 @@ typedef struct app_context_t {
     volatile int dual_ws_reminder_done;
     volatile int wakeup_greeting_pending;
     volatile int auto_relisten_on_idle;
+    volatile uint64_t music_grace_deadline_ms;
     volatile int start_listening_sent;
 } app_context_t;
 
