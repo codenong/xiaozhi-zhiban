@@ -380,6 +380,7 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
             PLOG_I("MCP", "volume_up: 按键注入%d步 (vol=%d)", steps, vol);
         }
         snprintf(result, result_size, "volume up (%d->%d)", vol, vol < 40 ? vol + 2 : vol);
+        music_player_mark_resume_after_tts();
         return 0;
     }
 
@@ -402,6 +403,7 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
             PLOG_I("MCP", "volume_down: 按键注入%d步 (vol=%d)", steps, vol);
         }
         snprintf(result, result_size, "volume down (%d->%d)", vol, vol > 0 ? vol - 2 : vol);
+        music_player_mark_resume_after_tts();
         return 0;
     }
 
@@ -454,6 +456,7 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
         int cur_pct = (cur >= 0 && cur <= 40) ? cur * 100 / 40 : pct;
         PLOG_I("MCP", "set_volume: %d%% (target=%d) %d -> %d (%d%%)", pct, target, start_vol, cur, cur_pct);
         snprintf(result, result_size, "volume set to %d%% (raw %d/40)", cur_pct, cur);
+        music_player_mark_resume_after_tts();
         return 0;
     }
 

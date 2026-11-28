@@ -1490,13 +1490,15 @@ static void on_proto_json(const char *json, size_t len, void *user_data)
                 xiaozhi_state_t cur_state = state_machine_get_state(&app->sm);
                 if (cur_state != kStateCleaning)
                 {
-                    if (music_player_has_deferred() || app->resume_music_after_reminder)
+                    bool resume_after_tts = music_player_take_resume_after_tts();
+                    if (music_player_has_deferred() || app->resume_music_after_reminder || resume_after_tts)
                     {
-                        PLOG_I("MUSIC", "TTS 播完且有待播音乐，立即起播并保持监听 10s");
+                        PLOG_I("MUSIC", "TTS 播完且有待播/需续播音乐，立即起播并保持监听 10s");
                         app->music_grace_deadline_ms = get_time_ms() + 10000;
                         state_machine_transition(&app->sm, kStateListening);
                         music_player_on_idle();
-                        if (app->resume_music_after_reminder && !music_player_has_deferred() &&
+                        if ((app->resume_music_after_reminder || resume_after_tts) &&
+                            !music_player_has_deferred() &&
                             music_player_get_state() == MUSIC_STATE_PAUSED)
                         {
                             music_player_resume(false);

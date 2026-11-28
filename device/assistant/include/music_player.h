@@ -25,6 +25,8 @@ void music_player_duck(int duration_ms);
 bool music_player_is_playing(void);
 bool music_player_has_deferred(void);
 bool music_player_take_natural_end(void);
+void music_player_mark_resume_after_tts(void);
+bool music_player_take_resume_after_tts(void);
 music_state_t music_player_get_state(void);
 void music_player_get_status(char *buf, size_t size);
 

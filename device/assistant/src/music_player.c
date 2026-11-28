@@ -63,6 +63,7 @@ typedef struct {
     bool defer_start;
     bool natural_end;
     uint64_t duck_until_ms;
+    bool resume_after_tts;
 
     char url[MP_URL_MAX];
     char title[MP_TITLE_MAX];
@@ -1073,4 +1074,25 @@ void music_player_duck(int duration_ms)
     uint64_t until = mp_now_ms() + (uint64_t)duration_ms;
     if (until > g_mp.duck_until_ms)
         g_mp.duck_until_ms = until;
+}
+
+void music_player_mark_resume_after_tts(void)
+{
+    if (!g_mp.initialized)
+        return;
+    pthread_mutex_lock(&g_mp.lock);
+    if (g_mp.state == MUSIC_STATE_PAUSED)
+        g_mp.resume_after_tts = true;
+    pthread_mutex_unlock(&g_mp.lock);
+}
+
+bool music_player_take_resume_after_tts(void)
+{
+    if (!g_mp.initialized)
+        return false;
+    pthread_mutex_lock(&g_mp.lock);
+    bool v = g_mp.resume_after_tts;
+    g_mp.resume_after_tts = false;
+    pthread_mutex_unlock(&g_mp.lock);
+    return v;
 }
