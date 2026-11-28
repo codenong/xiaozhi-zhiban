@@ -415,20 +415,34 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
         if ((s_diag_tick++ % 50) == 0)
             s_diag_on = (access("/var/upgrade/.rec_dump", F_OK) == 0);
 
+        static int s_ref_ema = 0;
         if (frames > 0)
         {
-            if (s_diag_on)
+            if (s_diag_on || (!mod->paused && music_player_is_playing()))
             {
+                long long b_ref = 0;
                 for (int i = 0; i < frames; i++)
                 {
-                    int v0 = aligned[i * 3 + 0];
-                    int v1 = aligned[i * 3 + 1];
                     int vr = aligned[i * 3 + 2];
-                    s_d_m0 += (v0 < 0) ? -v0 : v0;
-                    s_d_m1 += (v1 < 0) ? -v1 : v1;
-                    s_d_ref += (vr < 0) ? -vr : vr;
+                    int avr = (vr < 0) ? -vr : vr;
+                    b_ref += avr;
+                    if (s_diag_on)
+                    {
+                        int v0 = aligned[i * 3 + 0];
+                        int v1 = aligned[i * 3 + 1];
+                        s_d_m0 += (v0 < 0) ? -v0 : v0;
+                        s_d_m1 += (v1 < 0) ? -v1 : v1;
+                        s_d_ref += avr;
+                    }
                 }
-                s_d_in_n += frames;
+                if (s_diag_on)
+                    s_d_in_n += frames;
+                int batch_ref = (int)(b_ref / frames);
+                s_ref_ema = (s_ref_ema * 3 + batch_ref) / 4;
+            }
+            else
+            {
+                s_ref_ema = 0;
             }
             mod->f_asr_feed_data(mod->asr_handle, aligned,
                                  frames * 3 * sizeof(int16_t)); /* 字节数(9fb80 反汇编定论: len 累加进写pos) */
@@ -467,7 +481,10 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
                 if (!mod->paused && s_duck_gate > 0 && ns > 0 && music_player_is_playing())
                 {
                     int favg = (int)(sum_f / ns);
-                    if (favg >= s_duck_gate)
+                    int eff_gate = (s_ref_ema * 45) / 100;
+                    if (eff_gate < s_duck_gate)
+                        eff_gate = s_duck_gate;
+                    if (favg >= eff_gate)
                     {
                         s_duck_hits++;
                         if (s_duck_hits >= 5)
@@ -476,7 +493,8 @@ static void wakeup_audio_callback(const int16_t *data, int len, void *user_data)
                             if (s_diag_tick - s_duck_log_tick > 60)
                             {
                                 s_duck_log_tick = s_diag_tick;
-                                PLOG_I("WAKEUP", "放歌中检测到人声(ffvp=%d>=%d)，音乐闪避 2.5s", favg, s_duck_gate);
+                                PLOG_I("WAKEUP", "放歌中检测到人声(ffvp=%d>=%d, ref=%d)，音乐闪避 2.5s",
+                                       favg, eff_gate, s_ref_ema);
                             }
                         }
                     }
