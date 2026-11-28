@@ -2621,6 +2621,13 @@ static void check_timeouts(app_context_t *app)
         break;
 
     case kStateListening:
+        if (app->music_grace_deadline_ms > 0 && now >= app->music_grace_deadline_ms)
+        {
+            app->music_grace_deadline_ms = 0;
+            PLOG_I("MUSIC", "放歌前10秒监听窗口到期，关闭WS进入Idle");
+            state_machine_transition(&app->sm, kStateCleaning);
+            break;
+        }
         /* 监听超时 */
         if (app->listening_mode != LISTENING_MODE_REALTIME && now - app->state_enter_time_ms > g_app.listen_timeout_ms)
         {
@@ -2644,17 +2651,7 @@ static void check_timeouts(app_context_t *app)
         break;
 
     case kStateCleaning:
-        if (app->music_grace_deadline_ms > 0 && get_time_ms() >= app->music_grace_deadline_ms)
-    {
-        app->music_grace_deadline_ms = 0;
-        if (state_machine_get_state(&app->sm) == kStateListening)
-        {
-            PLOG_I("MUSIC", "放歌前10秒监听窗口到期，关闭WS进入Idle");
-            state_machine_transition(&app->sm, kStateCleaning);
-        }
-    }
-
-    /* 清理超时（pending_cleaning_done未触发时强制回到Idle） */
+        /* 清理超时（pending_cleaning_done未触发时强制回到Idle） */
         if (now - app->state_enter_time_ms > CLEANUP_TIMEOUT_MS)
         {
             PLOG_W("TIMEOUT", "清理超时 (pending_cleaning_done 未触发?), 强制回到 Idle");
