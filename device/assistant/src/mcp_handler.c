@@ -405,6 +405,58 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
         return 0;
     }
 
+    if (strcmp(name, "self.audio_speaker.set_volume") == 0)
+    {
+        int pct = find_int(args_json, args_len, "volume", -1);
+        if (pct < 0)
+        {
+            snprintf(result, result_size, "missing volume (0-100)");
+            return -1;
+        }
+        if (pct > 100) pct = 100;
+        int target = (pct * 40 + 50) / 100;
+        if (target < 0) target = 0;
+        if (target > 40) target = 40;
+
+        int start_vol = mcp->sound_get_sys_volume ? mcp->sound_get_sys_volume() : 0;
+        int cur = start_vol;
+        int stall = 0;
+        for (int iter = 0; iter < 25; iter++)
+        {
+            if (cur == target)
+                break;
+            int key = (cur < target) ? INJECT_KEY_VOLUP : INJECT_KEY_VOLDOWN;
+            int prev = cur;
+            if (inject_key_repeat(key, 1) < 0)
+            {
+                stall = 99;
+                break;
+            }
+            usleep(60000);
+            cur = mcp->sound_get_sys_volume ? mcp->sound_get_sys_volume() : target;
+            if ((prev < target && cur >= target) || (prev > target && cur <= target))
+                break;
+            if (cur == prev)
+            {
+                if (++stall >= 2)
+                    break;
+            }
+            else
+            {
+                stall = 0;
+            }
+        }
+        if (cur != target && stall >= 2 && mcp->sound_set_sys_volume)
+        {
+            mcp->sound_set_sys_volume(target);
+            cur = mcp->sound_get_sys_volume ? mcp->sound_get_sys_volume() : target;
+        }
+        int cur_pct = (cur >= 0 && cur <= 40) ? cur * 100 / 40 : pct;
+        PLOG_I("MCP", "set_volume: %d%% (target=%d) %d -> %d (%d%%)", pct, target, start_vol, cur, cur_pct);
+        snprintf(result, result_size, "volume set to %d%% (raw %d/40)", cur_pct, cur);
+        return 0;
+    }
+
     if (strcmp(name, "self.reboot") == 0)
     {
         snprintf(result, result_size, "rebooting");
@@ -702,6 +754,7 @@ static int exec_tool(mcp_handler_t *mcp, const char *name, const char *args_json
                  "1.self.get_device_status - Get device status (volume%%,battery,CPU,memory); "
                  "2.self.audio_speaker.volume_up - Increase volume by one step (shows native volume bar); "
                  "3.self.audio_speaker.volume_down - Decrease volume by one step (shows native volume bar); "
+                 "3b.self.audio_speaker.set_volume - Set volume percentage (0-100); "
                  "4.self.get_system_info - Get system info; "
                  "5.self.clean_junk - Clean temp files and drop caches; "
                  "6.self.get_mcp_tools - List all MCP tools; "
@@ -853,6 +906,7 @@ void mcp_handler_process_message(mcp_handler_t *mcp, const char *json, size_t le
                                  "{\"name\":\"self.get_device_status\",\"description\":\"Device status: volume, battery, charging, CPU, memory. 问设备状态/电量/音量\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
                                  "{\"name\":\"self.audio_speaker.volume_up\",\"description\":\"Volume up one step, native volume bar shown. 大点声/调大音量\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
                                  "{\"name\":\"self.audio_speaker.volume_down\",\"description\":\"Volume down one step, native volume bar shown. 小点声/调小音量\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
+                                 "{\"name\":\"self.audio_speaker.set_volume\",\"description\":\"Set speaker volume to a specific percentage (0-100). 把音量调到X%/设为X%\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"volume\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":100,\"description\":\"Target volume percentage 0-100\"}},\"required\":[\"volume\"]}}},"
                                  "{\"name\":\"self.get_system_info\",\"description\":\"System info: version, volume, battery. 查版本/系统信息\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
                                  "{\"name\":\"self.clean_junk\",\"description\":\"Clean temp files and caches to free memory. 清理垃圾/清理内存\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
                                  "{\"name\":\"self.get_mcp_tools\",\"description\":\"List all device MCP tools. 有哪些工具\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
